@@ -21,9 +21,10 @@ std::string CommonFileName();
 void WriterInitialize(std::vector<cv::VideoWriter>& vwrite, std::string &file, double& fps, std::vector<cv::Mat>& img);
 void WriteFrames(std::vector<cv::VideoWriter>& vwrite, std::vector<cv::Mat>& imgs);
 std::vector<cv::Mat> CaptureMultipleFrames(std::vector<cv::VideoCapture>& devices, double &timestamp);
-void DisplayInfo(const std::string &window, std::string& text, double& tstart, double& fps);
-void CalcFPS(double& calcfps, double& fps, double& counter, double& tstart, double& tend);
+void DisplayInfo(const std::string &window, std::string& text, double& fps);
+void CalcFPS(double& calcfps, double& fps, double& counter, double& tstart, double& tend, double &sec);
 void WriteCSVHeaders(std::ofstream& file, std::vector<std::string>& headers);
 void WriteData(std::ofstream& file, double& timestamp, double& duration);
+bool CheckForFrameUpdate(double& tick, double& tock, double& ms);
 
 #endif // REC_HPP

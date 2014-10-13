@@ -280,9 +280,9 @@ vector<Mat> CaptureMultipleFrames(vector<VideoCapture>& devices, double& timesta
     return imgs_captured;
 }
 
-void CalcFPS(double& calcfps, double& fps, double& counter, double& tstart, double& tend)
+void CalcFPS(double& calcfps, double& fps, double& counter, double& tstart, double& tend, double& sec)
 {
-    if (counter > fps * 10)
+    if (counter > fps * sec)
     {
         double t_elapse;
         TimeElapsed(t_elapse, tstart, tend);
@@ -294,18 +294,11 @@ void CalcFPS(double& calcfps, double& fps, double& counter, double& tstart, doub
 
 }
 
-void DisplayInfo(const string& window, string& text, double& tstart, double& fps)
+void DisplayInfo(const string& window, string& text, double& fps)
 {
-    int displayTime = 1000;
-    double tick;
-    UpdateTick(tick);
-
-    if ((tick-tstart) / getTickFrequency() > 5)
-    {
-        text = "FPS: " + to_string(fps);
-        displayOverlay(window, text, displayTime);
-        displayStatusBar(window, "RECORDING", 6000);
-    }
+    text = "FPS: " + to_string(fps);
+    displayOverlay(window, text, 0);
+    displayStatusBar(window, "RECORDING", 0);
 }
 
 void WriteCSVHeaders(ofstream& file, vector<string>& headers)
@@ -332,4 +325,21 @@ void WriteData(ofstream& file, double& timestamp, double& duration)
     file << std::fixed << std::setprecision(5) << timestamp << ","
          << std::fixed << std::setprecision(2) << duration << ","
          << endl;
+}
+
+bool CheckForFrameUpdate(double& tick, double& tock, double& ms)
+{
+    bool go = false;
+    double dur;
+    TimeDuration(dur, tick, tock);
+
+    if (dur > ms)
+    {
+        go = true;
+        UpdateTick(tick);
+    }
+
+
+
+    return go;
 }
