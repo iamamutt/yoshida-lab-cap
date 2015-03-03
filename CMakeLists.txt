@@ -1,20 +1,28 @@
 CMAKE_MINIMUM_REQUIRED( VERSION 3.0 )
 
-set( PROJECT_NAME yoshida-lab-cap )
-set( BIN_NAME cdlcap )
-set( CMAKE_BUILD_TYPE Release )
-set( HEADER_FILES rec.hpp axis.hpp)
-set( SOURCE_FILES main.cpp rec.cpp axis.cpp)
+project(HY_LAB_CAM_SYNC)
 
-project( ${PROJECT_NAME} )
+set(BIN_NAME cogdevcam)
+set(CMAKE_BUILD_TYPE Release)
+set(SOURCE_FILES main.cpp)
+set(Boost_USE_STATIC_LIBS    ON)
+set(Boost_USE_MULTITHREADED  ON)
+set(Boost_USE_STATIC_RUNTIME OFF)
 
-find_package( OpenCV REQUIRED )
+add_compile_options(-std=c++11)
 
-add_executable( ${BIN_NAME} ${SOURCE_FILES} ${HEADER_FILES} )
+find_package(OpenCV REQUIRED)
+find_package(Boost 1.55.0 COMPONENTS program_options REQUIRED system REQUIRED filesystem REQUIRED date_time REQUIRED)
 
-# Windows doesn't like OpenCV_Includes for some reason
-include_directories( ${OpenCV_DIR}/../../../include )
+if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+    include_directories($ENV{OpenCV_DIR}/include ${Boost_INCLUDE_DIRS})
+elseif (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    include_directories(${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS})
+endif()
 
-target_link_libraries( ${BIN_NAME} ${OpenCV_LIBS} )
+link_directories(${Boost_LIBRARY_DIRS})
 
-set( EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/../bin )
+add_executable(${BIN_NAME} ${SOURCE_FILES})
+target_link_libraries(${BIN_NAME} ${OpenCV_LIBS} ${Boost_LIBRARIES})
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
