@@ -19,7 +19,7 @@ find_package(OpenCV REQUIRED)
 find_package(Boost 1.55.0 COMPONENTS program_options REQUIRED system REQUIRED filesystem REQUIRED date_time REQUIRED)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-    include_directories($ENV{OpenCV_DIR}/include ${Boost_INCLUDE_DIRS})
+    include_directories(${OpenCV_INCLUDE_DIRS} $ENV{OpenCV_DIR}/../../../include ${Boost_INCLUDE_DIRS})
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     include_directories(${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS})
 endif()
