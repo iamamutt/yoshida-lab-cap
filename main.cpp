@@ -172,7 +172,6 @@ vector<string> makeDirectory(string &rootPath)
        << now.time_of_day().hours() << "_"
        << now.time_of_day().minutes();
 
-    std::cout << ts.str() << std::endl;
     string file_prefix (ts.str());
     string folder_name = {rootPath + file_prefix};
 
@@ -209,7 +208,7 @@ void printTime(string idx, time_point<high_resolution_clock> ts)
 
 void recSwitch(int recPosition, void*)
 {
-    cout << "\nRec = " << recPosition << endl;
+    cout << "\nRecording = " << recPosition << endl;
 }
 
 void removeDirectory(string &folder)
@@ -238,7 +237,7 @@ void videoDisplaySetup(Size& grid, Size& imdim, vector<Mat>& imgs, double& scale
     Mat tmp_heights = Mat_<double>(m_rows, n_cols);
     Mat tmp_widths = Mat_<double>(m_rows, n_cols);
 
-    cout << n_cols << " x " << m_rows << endl;
+    cout << "\nGrid size: " << m_rows << " x " << n_cols << endl;
 
     int dev_idx = 0;
 
@@ -271,22 +270,19 @@ void videoDisplaySetup(Size& grid, Size& imdim, vector<Mat>& imgs, double& scale
     }
 
     // sum of widths for each row in grid, find max
-    Mat tmp_w_max = Mat_<double>(m_rows, 1);
-    for (int m=0; m < m_rows; m++) {
-        tmp_w_max.at<double>(m,1) = 0;
-    }
+    vector<double> max_col(m_rows, 0);
     for (int m=0; m < m_rows; m++) {
         for (int n=0; n < n_cols; n++) {
-
-            tmp_w_max.at<double>(m,1) = tmp_w_max.at<double>(m,1) + tmp_widths.at<double>(m,n);
+            max_col[m] += tmp_widths.at<double>(m,n);
         }
     }
-    minMaxIdx(tmp_w_max, 0, &img_width);
+    auto max_col_it = std::min_element(std::begin(max_col), std::end(max_col));
+    img_width = *max_col_it;
 
-    imdim = Size(static_cast<int>(round(img_width+n_cols-1)), static_cast<int>(round(img_height+m_rows-1)));
+    imdim = Size(static_cast<int>(ceil(img_width+n_cols-1)), static_cast<int>(ceil(img_height+m_rows-1)));
     grid = Size(n_cols, m_rows);
 
-    cout << imdim.height << " x " << imdim.width << endl;
+    cout  << "Display dim: " << imdim.height << " x " << imdim.width << endl;
 }
 
 void waitMilliseconds(int t)
