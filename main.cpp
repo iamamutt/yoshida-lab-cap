@@ -89,9 +89,9 @@ Mat imDisplay(string title, vector<Mat>& imgs,
                 in_img(in_roi_h, in_roi_w).copyTo(out_img(out_roi_h, out_roi_w));
             }
             img_idx++;
-            out_w_start = out_w_end + 1;
+            out_w_start = out_w_end + 2;
         }
-        out_h_start = out_h_end + 1;
+        out_h_start = out_h_end + 2;
     }
 
     if (rec == 1) {
@@ -237,8 +237,6 @@ void videoDisplaySetup(Size& grid, Size& imdim, vector<Mat>& imgs, double& scale
     Mat tmp_heights = Mat_<double>(m_rows, n_cols);
     Mat tmp_widths = Mat_<double>(m_rows, n_cols);
 
-    cout << "\nGrid size: " << m_rows << " x " << n_cols << endl;
-
     int dev_idx = 0;
 
     for (int m=0; m < m_rows; m++)
@@ -270,19 +268,23 @@ void videoDisplaySetup(Size& grid, Size& imdim, vector<Mat>& imgs, double& scale
     }
 
     // sum of widths for each row in grid, find max
-    vector<double> max_col(m_rows, 0);
+    vector<double> row_sums(m_rows, 0);
     for (int m=0; m < m_rows; m++) {
         for (int n=0; n < n_cols; n++) {
-            max_col[m] += tmp_widths.at<double>(m,n);
+            row_sums[m] += tmp_widths.at<double>(m,n);
         }
     }
-    auto max_col_it = std::min_element(std::begin(max_col), std::end(max_col));
+    auto max_col_it = std::max_element(std::begin(row_sums), std::end(row_sums));
     img_width = *max_col_it;
 
     imdim = Size(static_cast<int>(ceil(img_width+n_cols-1)), static_cast<int>(ceil(img_height+m_rows-1)));
     grid = Size(n_cols, m_rows);
 
-    cout  << "Display dim: " << imdim.height << " x " << imdim.width << endl;
+    cout << "Display dim: "
+         << imdim.width << " x " << imdim.height
+         << "\nGrid size: "
+         << grid.width << " x " << grid.height
+         << endl;
 }
 
 void waitMilliseconds(int t)
@@ -326,6 +328,7 @@ int main(int argc, char* argv[])
     double fps;
     int fbl;
     double resize_disp_value;
+    string window_name;
 
     try {
         po::options_description generic_ops("Generic Options");
@@ -349,6 +352,8 @@ int main(int argc, char* argv[])
                  "FRAME BUFFER LENGTH:\n-Buffer size for holding consecutive frames. This will affect imshow latency.\n-Example: --fbl=10 or -b 10")
                 ("res,r", po::value<double>(&resize_disp_value)->default_value(0.33),
                  "RESIZE SCALER:\n-Value corresponding to how much to resize the display image.\n-Example: --res=.5 or -r .5")
+                ("win,w", po::value<string>(&window_name)->default_value("YOSHIDA-VIEW"),
+                 "WINDOW NAME:\n-Name to display at top of window.\n-Example: --win=stuff or -w stuff")
                 ;
 
         po::options_description cmdline_options;
@@ -406,12 +411,13 @@ int main(int argc, char* argv[])
     double frame_duration = 1000 / fps;
     double read_duration_ms = frame_duration * fbl;
     int presentTick;
+    double loopBreakTime;
+    int showCounter;
     int recPosition = 0;
     bool REC_FLAG = false;
     int exit_key = 27;
     Size grid_size_disp;
     Size disp_size_disp;
-    string window_name ("yoshida-view");
 
     // initialize cameras, get first frames
     vector<Mat> showImages(nCams);
@@ -432,7 +438,7 @@ int main(int argc, char* argv[])
             break;
         }
 
-        if (waitKey(15) == exit_key) {
+        if (waitKey(static_cast<int>(frame_duration)) == exit_key) {
             break;
         }
     }
@@ -476,19 +482,29 @@ int main(int argc, char* argv[])
 
             // hold frames and timestamps for next loop iteration
             vector<future<void>> presentBufferThread;
-            presentTick = msTimeStamp(startTime);
-            for (int i = 0; i < nCams; i++)
-            {
+            presentTick = msTimeStamp(startTime); // main start timestamp
+            loopBreakTime = static_cast<double>(presentTick) + read_duration_ms-2;
+
+            // Start threaded buffer fill until reach end time
+            for (int i = 0; i < nCams; i++) {
                 presentBuffer[i].clear();
                 presentTimeStamps[i].clear();
-                presentBufferThread.emplace_back(async(launch::async,[&capVec,&presentBuffer,&startTime,&presentTimeStamps,&presentTick,&read_duration_ms,&frame_duration](int j)
+                presentBufferThread.emplace_back(
+                            async(launch::async,[
+                                  &capVec,
+                                  &presentBuffer,
+                                  &startTime,
+                                  &presentTimeStamps,
+                                  &loopBreakTime
+                                  ](int j)
                 {
-                    double loopBreakTime = static_cast<double>(presentTick) + read_duration_ms-2;
                     double currentLoopTime;
                     for (;;) {
+                        // grab, timestamp, decode, push to buffer, check time
+                        Mat placeHolderImg;
+
                         capVec[j].grab();
                         presentTimeStamps[j].emplace_back(msTimeStamp(startTime));
-                        Mat placeHolderImg;
                         capVec[j].retrieve(placeHolderImg);
                         presentBuffer[j].emplace_back(placeHolderImg);
                         currentLoopTime = static_cast<double>(msTimeStamp(startTime));
@@ -499,53 +515,62 @@ int main(int argc, char* argv[])
                 }, i));
             }
 
-            if (recPosition == 1) {
-                vector<int64> capturedTimeStamps(nCams+1);
-                int showCounter = 0;
+            if (recPosition == 1) { // if 0 then pause recording
+                // first slot is the common time stamp, loop time
+                vector<int64> timeStampsForWriting(nCams+1);
+                showCounter = 0;
 
                 // process previous frames using timestamps
                 for (double t = static_cast<double>(pastTick);
                      t < static_cast<double>(pastTick+read_duration_ms);
                      t = t+frame_duration) {
-
-                    capturedTimeStamps[0] = static_cast<int64>(t); // loop time
+                   showCounter++; // for copying only the last image to view
+                    timeStampsForWriting[0] = static_cast<int64>(t);
                     vector<future<void>> readWriteBuffer;
-                    showCounter++;
 
+                    // write asynchronously
                     for (int i = 0; i < nCams; i++) {
-                        readWriteBuffer.emplace_back(async(launch::async,[&pastBuffer,&pastTimeStamps,&capturedTimeStamps,&t,&writeVec,&showImages,&showCounter](int j)
+                        readWriteBuffer.emplace_back(
+                                    async(launch::async,[
+                                          &pastBuffer,
+                                          &pastTimeStamps,
+                                          &timeStampsForWriting,
+                                          &t,
+                                          &writeVec,
+                                          &showImages,
+                                          &showCounter
+                                          ](int j)
                         {
                             int64 nearestTimeStamp = findNearestTimeStamp(t, pastTimeStamps[j]);
-                            capturedTimeStamps[j+1] = pastTimeStamps[j][nearestTimeStamp];
-                            Mat closestFrame = pastBuffer[j][nearestTimeStamp];
-                            writeVec[j] << closestFrame;
+                            timeStampsForWriting[j+1] = pastTimeStamps[j][nearestTimeStamp];
+                            writeVec[j] << pastBuffer[j][nearestTimeStamp];
                             if (showCounter == 1) {
-                                showImages[j] = closestFrame;
+                                showImages[j] = pastBuffer[j].back();
                             }
                         }, i));
                     }
 
+                    // wait for all devices to write one frame
                     for (int i = 0; i < nCams; i++) {
                         readWriteBuffer[i].wait();
                     }
 
-                    writeTimeStampData(out_file, capturedTimeStamps);
+                    // write timestamp data
+                    writeTimeStampData(out_file, timeStampsForWriting);
                 }
             } else {
+                // just make viewing images only
                 for (int i = 0; i < nCams; i++) {
-                    Mat lastFrame = pastBuffer[i].back();
-                    showImages[i] = lastFrame;
+                    showImages[i] = pastBuffer[i].back();
                 }
             }
 
             // show last image from buffer
             imDisplay(window_name, showImages, disp_size_disp, grid_size_disp, resize_disp_value, recPosition);
 
-            //int junkTick = msTimeStamp(startTime);
             for (int i = 0; i < nCams; i++) {
                 presentBufferThread[i].wait();
             }
-            //cout << msTimeStamp(startTime)-junkTick << endl;
 
             if (waitKey(1) == exit_key) {
                 destroyWindow(window_name);
