@@ -22,9 +22,9 @@ void colorizeMat(Mat &img)
 {
     for (int m = 0; m < img.rows; m++) {
         for (int n = 0; n < img.cols; n++) {
-            img.at<Vec3b>(m,n)[0] = 255;
+            img.at<Vec3b>(m,n)[0] = 0;
             img.at<Vec3b>(m,n)[1] = 0;
-            img.at<Vec3b>(m,n)[2] = 0;
+            img.at<Vec3b>(m,n)[2] = 255;
         }
     }
 }
@@ -130,7 +130,6 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
 
                 if (!devices[device_counter].isOpened()) {
                     cerr << "Cam not found with ID: " << usb_ids[i] << endl;
-                    devices[device_counter].release();
                     continue;
                 }
 
@@ -176,7 +175,6 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
 
                 if (!devices[device_counter].isOpened()) {
                     cerr << "Cam not found with url:\n" << url_ids[i] << endl;
-                    devices[device_counter].release();
                     continue;
                 }
 
@@ -399,7 +397,7 @@ int main(int argc, char* argv[])
         generic_ops.add_options()
                 ("help","Show help for usage of application options")
                 ("config,c", po::value<string>(&config_file)->default_value("cam_opts.cfg"),
-                 "Path to location of a configuration (.cfg) file. You can set common usage parameters in this file. Uses cam_opts.cfg by default.")
+                 "CONFIG FILE:\n-Path to location of a configuration (.cfg) file. You can set common usage parameters in this file. Uses cam_opts.cfg by default.")
                 ;
 
         po::options_description config_ops("Commande Line or Configuration File Options");
@@ -439,7 +437,7 @@ int main(int argc, char* argv[])
 
         ifstream ifs(config_file.c_str());
         if (!ifs) {
-            cout << "Could not open config file: " << config_file << "\n";
+            cout << "Could not open config file. Make sure cam_opts.cfg exists along with this program or that you specify a path to a custom .cfg file using the --cfg argument\n";
             return 0;
         }
         else {
@@ -448,7 +446,7 @@ int main(int argc, char* argv[])
         }
 
         if (vm.count("help")) {
-            cout << "Help documentation for Cogdev Lab Cam Sync: Joseph M. Burling\n";
+            cout << "Help documentation for Cogdev Lab Cam Sync:\nAuthor: Joseph M. Burling\n";
             cout << cmdline_options;
             return 0;
         }
