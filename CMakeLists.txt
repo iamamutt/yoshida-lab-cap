@@ -14,7 +14,7 @@ set(Boost_USE_STATIC_RUNTIME ON)
 add_compile_options(-std=c++11)
 
 # if using windows using visual studio libraries for opencv
-# if osx, make sure to install ffmpeg with opencv
+# if osx, make sure to install ffmpeg along with opencv
 find_package(OpenCV REQUIRED)
 find_package(Boost 1.55.0 COMPONENTS program_options REQUIRED system REQUIRED filesystem REQUIRED date_time REQUIRED)
 
@@ -27,7 +27,7 @@ endif()
 link_directories(${Boost_LIBRARY_DIRS})
 
 add_executable(${BIN_NAME} ${SOURCE_FILES})
-target_link_libraries(${BIN_NAME} ${OpenCV_LIBS} ${Boost_LIBRARIES} ${FFMPEG_LIB})
+target_link_libraries(${BIN_NAME} ${OpenCV_LIBS} ${Boost_LIBRARIES})
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_CXX_FLAGS_RELEASE "/MT")

@@ -108,33 +108,96 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
     size_t n_usb = usb_ids.size();
     size_t n_url = url_ids.size();
     vector<VideoCapture> devices (n_usb + n_url);
-    string url;
     int device_counter = 0;
 
     if (n_usb != 0) {
         for (int i=0; i < n_usb; i++){
-            cout << "\nTrying USB device: \n" << usb_ids[i] << endl;
-            devices[device_counter].open(usb_ids[i]);
+            cout << "\nTrying to load USB device: " << usb_ids[i] << endl;
 
-            if (!devices[device_counter].read(imgs[device_counter])){
-                cout << "\nCannot open video device: " << usb_ids[i] << endl;
-                throw;
+            Mat tmpImg;
+            int capCounter = 0;
+            bool capFail = true;
+
+            while (capFail) {
+                ++capCounter;
+
+                if (capCounter > 10) {
+                    cerr << "failed to open device " << usb_ids[i] << " too many times!" << endl;
+                    throw;
+                }
+
+                devices[device_counter].open(usb_ids[i]);
+
+                if (!devices[device_counter].isOpened()) {
+                    cerr << "Cam not found with ID: " << usb_ids[i] << endl;
+                    devices[device_counter].release();
+                    continue;
+                }
+
+                if (!devices[device_counter].grab()) {
+                    cerr << "Frame was not grabbed successfully for USB cam: " << usb_ids[i] << endl;
+                    devices[device_counter].release();
+                    continue;
+                }
+
+                if (!devices[device_counter].retrieve(tmpImg)){
+                    cerr << "Frame was not decoded successfully for USB cam: " << usb_ids[i] << endl;
+                    devices[device_counter].release();
+                    continue;
+                }
+
+                cout << "Loading of usb device: " << usb_ids[i] << " ...successful!" << endl;
+                capFail = false;
+
             }
-            colorizeMat(imgs[device_counter]);
+
+            imgs[device_counter] = tmpImg.clone();
             device_counter++;
         }
     }
 
     if (n_url != 0) {
         for (int i=0; i < n_url; i++){
-            cout << "\nTrying URL: \n" << url_ids[i] << endl;
-            devices[device_counter].open(url_ids[i]);
+            cout << "\nTrying IP url:\n" << url_ids[i] << endl;
 
-            if (!devices[device_counter].read(imgs[device_counter])){
-                cout << "\nCannot open video device: " << url_ids[i] << endl;
-                throw;
+            Mat tmpImg;
+            int capCounter = 0;
+            bool capFail = true;
+
+            while (capFail) {
+                ++capCounter;
+
+                if (capCounter > 10) {
+                    cerr << "failed to open url too many times:\n" << url_ids[i] << endl;
+                    throw;
+                }
+
+                devices[device_counter].open(url_ids[i]);
+
+                if (!devices[device_counter].isOpened()) {
+                    cerr << "Cam not found with url:\n" << url_ids[i] << endl;
+                    devices[device_counter].release();
+                    continue;
+                }
+
+                if (!devices[device_counter].grab()) {
+                    cerr << "Frame was not grabbed successfully for IP cam: " << url_ids[i] << endl;
+                    devices[device_counter].release();
+                    continue;
+                }
+
+                if (!devices[device_counter].retrieve(tmpImg)){
+                    cerr << "Frame was not decoded successfully for IP cam: " << url_ids[i] << endl;
+                    devices[device_counter].release();
+                    continue;
+                }
+
+                cout << "Loading of IP url successful!:\n" << url_ids[i] << endl;
+                capFail = false;
+
             }
-            colorizeMat(imgs[device_counter]);
+
+            imgs[device_counter] = tmpImg.clone();
             device_counter++;
         }
     }
@@ -517,7 +580,7 @@ int main(int argc, char* argv[])
                         capVec[j].grab();
                         presentTimeStamps[j].emplace_back(msTimeStamp(startTime));
                         capVec[j].retrieve(placeHolderImg);
-                        presentBuffer[j].emplace_back(placeHolderImg);
+                        presentBuffer[j].emplace_back(placeHolderImg.clone());
                         currentLoopTime = static_cast<double>(msTimeStamp(startTime));
                         if (currentLoopTime >= loopBreakTime) {
                             break;
@@ -569,6 +632,7 @@ int main(int argc, char* argv[])
                     // write timestamp data
                     writeTimeStampData(out_file, timeStampsForWriting);
                 }
+
             } else {
                 // just make viewing images only
                 for (int i = 0; i < nCams; i++) {
