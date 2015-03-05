@@ -27,7 +27,7 @@ endif()
 link_directories(${Boost_LIBRARY_DIRS})
 
 add_executable(${BIN_NAME} ${SOURCE_FILES})
-target_link_libraries(${BIN_NAME} ${OpenCV_LIBS} ${Boost_LIBRARIES})
+target_link_libraries(${BIN_NAME} ${OpenCV_LIBS} ${Boost_LIBRARIES} ${FFMPEG_LIB})
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_CXX_FLAGS_RELEASE "/MT")

@@ -142,13 +142,12 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
     return devices;
 }
 
-vector<VideoWriter> initWriteDevices(vector<VideoCapture>& capDevices, vector<string>& paths, double& fps)
+vector<VideoWriter> initWriteDevices(vector<VideoCapture>& capDevices, vector<string>& paths, double& fps, string &four_cc, string &ext)
 {
+
     vector<VideoWriter> vidWriteVec(capDevices.size());
-    int codec = VideoWriter::fourcc('M','P','4','V');
-    string fileExt (".m4v");
-    //int codec = VideoWriter::fourcc('M','J','P','G');
-    //string fileExt (".avi");
+    int codec = VideoWriter::fourcc(four_cc[0], four_cc[1], four_cc[2], four_cc[3]);
+    string fileExt ("." + ext);
 
     string fileStr;
 
@@ -329,6 +328,8 @@ int main(int argc, char* argv[])
     int fbl;
     double resize_disp_value;
     string window_name;
+    string four_cc;
+    string file_extension;
 
     try {
         po::options_description generic_ops("Generic Options");
@@ -346,14 +347,18 @@ int main(int argc, char* argv[])
                  "URL ID:\n-String of the full url for IP cameras, no quotes. May be used multiple times.\n-Examples: --url=http://112.0.0.1 or -i http://...")
                 ("out,o", po::value<string>(&save_path)->default_value("data/"),
                  "OUT PATH:\n-Path to location for where to save the output files.\n-Example: --out=data/ or -o data/")
-                ("fps,f", po::value<double>(&fps)->default_value(25),
+                ("fps,f", po::value<double>(&fps)->default_value(30),
                  "FRAMES PER SECOND:\n-Frames per second for all output videos, no matter the input fps.\n-Example: --fps=25 or -f 25")
-                ("fbl,b", po::value<int>(&fbl)->default_value(25),
+                ("fbl,b", po::value<int>(&fbl)->default_value(15),
                  "FRAME BUFFER LENGTH:\n-Buffer size for holding consecutive frames. This will affect imshow latency.\n-Example: --fbl=10 or -b 10")
-                ("res,r", po::value<double>(&resize_disp_value)->default_value(0.33),
+                ("res,r", po::value<double>(&resize_disp_value)->default_value(0.5),
                  "RESIZE SCALER:\n-Value corresponding to how much to resize the display image.\n-Example: --res=.5 or -r .5")
                 ("win,w", po::value<string>(&window_name)->default_value("YOSHIDA-VIEW"),
                  "WINDOW NAME:\n-Name to display at top of window.\n-Example: --win=stuff or -w stuff")
+                ("codec", po::value<string>(&four_cc)->default_value("MJPG"),
+                 "CODEC:\n-Upper case four letter code for the codec used to export video.\n-Example: --codec=MP4V")
+                ("ext", po::value<string>(&file_extension)->default_value("avi"),
+                 "EXTENSION:\n-Lower case three letter extension/wrapper for the video file.\n-Example: --ext=m4v")
                 ;
 
         po::options_description cmdline_options;
@@ -392,6 +397,12 @@ int main(int argc, char* argv[])
         if (vm.count("url")) {
             ip_url = vm["url"].as< vector<string> >();
         }
+
+        if (four_cc.size() != 4) {
+            cout << "Please enter a codec with at least four characeters. see FOURCC.org." << endl;
+            return 0;
+        }
+
 
     }
     catch(std::exception& e)
@@ -448,7 +459,7 @@ int main(int argc, char* argv[])
         vector<string> file_str = makeDirectory(save_path);
 
         // initialize writer
-        vector<VideoWriter> writeVec = initWriteDevices(capVec, file_str, fps);
+        vector<VideoWriter> writeVec = initWriteDevices(capVec, file_str, fps, four_cc, file_extension);
 
         // data writer
         ofstream out_file (file_str[0] + "/timeStamps_0_" + file_str[1] + ".csv");
