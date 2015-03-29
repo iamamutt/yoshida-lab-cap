@@ -10,18 +10,15 @@ set(BIN_NAME cogdevcam)
 
 project(HY_LAB_CAM_SYNC)
 
-# if using windows using visual studio libraries for opencv
-# if osx, make sure to install ffmpeg along with opencv
 find_package(OpenCV REQUIRED)
 find_package(Boost 1.55.0 COMPONENTS program_options REQUIRED system REQUIRED filesystem REQUIRED date_time REQUIRED)
 
-# build boost on Windows with b2.exe --toolset=msvc variant=release address-model=64 link=static threading=multi runtime-link=static stage
 set(Boost_USE_STATIC_LIBS    ON)
 set(Boost_USE_MULTITHREADED  ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-    list(APPEND LINKLIBS rtaudio_static dsound)
+    list(APPEND LINKLIBS lib/rtaudio_static lib/dsound)
     list(APPEND SOURCE_FILES include/dsound.h)
     include_directories(${OpenCV_INCLUDE_DIRS} $ENV{OpenCV_DIR}/../../../include ${Boost_INCLUDE_DIRS})
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
