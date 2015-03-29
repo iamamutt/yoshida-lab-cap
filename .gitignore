@@ -1,3 +1,4 @@
 # QT Creator
 *.txt.user
 .DS_Store
+lib/**
