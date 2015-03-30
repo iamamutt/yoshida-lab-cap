@@ -36,7 +36,7 @@ I built using cmake with the DirectSound option on Windows and the Core option o
 
 You should either create an environment variable called `RTAUDIO` which points to the built static library, or place it in a location that can be easily found, such as `/usr/local/lib` on Mac.
 
-On Windows, if using DirectSound, you will need the files `dsound.h` and the dsound.lib`, which can be obtained from the Windows SDK.
+On Windows, if using DirectSound, you will need the files `dsound.h` and the `dsound.lib`, which can be obtained from the Windows SDK.
 
 Place `RtAudio.h` in the include folder, and if on Windows, also place `dsound.h` in this folder as well.
 
