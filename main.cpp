@@ -37,14 +37,14 @@ void colorizeMat(Mat &img)
     }
 }
 
-int64 findNearestTimeStamp(double tick, vector<int> ticks)
+int findNearestTimeStamp(double tick, vector<int> ticks)
 {
     vector<double> tickDiff(ticks.size());
     for (int i = 0; i < ticks.size(); i++) {
-        tickDiff[i] = abs(static_cast<double>(ticks[i]-tick));
+        tickDiff[i] = abs(static_cast<double>(ticks[i])-tick);
     }
     vector<double>::iterator mins = min_element(tickDiff.begin(), tickDiff.end());
-    int64 min_index = distance(tickDiff.begin(), mins);
+    auto min_index = static_cast<int>(distance(tickDiff.begin(), mins));
     return min_index;
 }
 
@@ -230,16 +230,16 @@ vector<VideoWriter> initWriteDevices(vector<VideoCapture>& capDevices, vector<st
     return vidWriteVec;
 }
 
-void loadAudioDevices(vector<AudioStruct> &aud_strct,
+void audioDeviceParameters(vector<AudioStruct> &aud_strct,
                       vector<RtAudio::StreamParameters> &stream_pram, vector<int> &dev_vec,
-                      unsigned int &sr, unsigned int &ac, unsigned int &ab,
+                      unsigned int &ar, unsigned int &ac, unsigned int &ab,
                       vector<string> &file_str)
 {
     for (int i=0; i < dev_vec.size(); i++) {
-        aud_strct[i].samplerate = sr;
+        aud_strct[i].samplerate = ar;
         aud_strct[i].channels = ac;
         aud_strct[i].buffersize = ab;
-        aud_strct[i].file.open(file_str[0] + "/audio_" + to_string(dev_vec[i]) + "_32bit_" + to_string(sr) + "Hz_" + to_string(ac) + "ch_" + file_str[1] + ".pcm", std::ios::binary);
+        aud_strct[i].file.open(file_str[0] + "/audio_" + to_string(i) + "_16bit_" + to_string(ar) + "Hz_" + to_string(ac) + "ch_" + file_str[1] + ".pcm", std::ios::binary);
         stream_pram[i].deviceId = dev_vec[i];
         stream_pram[i].nChannels = ac;
         stream_pram[i].firstChannel = 0;
@@ -299,15 +299,9 @@ int recordAudio(void *outputBuffer, void *inputBuffer,
                 unsigned int nBufferFrames, double streamTime,
                 RtAudioStreamStatus status, void *data)
 {
-    if (status) {
-        std::cout << "Stream overflow detected!" << std::endl;
-    }
-
+    if (status) std::cout << "Stream overflow detected!" << std::endl;
     AudioStruct *inputData = (AudioStruct *) data;
-
-    //std::cout << inputData->samplerate << std::endl;
-    inputData->file.write((char *) inputBuffer, sizeof(float) * nBufferFrames * inputData->channels);
-
+    inputData->file.write((char *) inputBuffer, sizeof(signed short) * nBufferFrames * inputData->channels);
     return 0;
 }
 
@@ -393,20 +387,19 @@ void waitMilliseconds(int t)
     std::this_thread::sleep_for(ms);
 }
 
-void writeCSVHeaders(ofstream& file, string name, int n)
+void writeCSVHeaders(ofstream& file, vector<string> name)
 {
+    size_t n = name.size();
     for (int i=0; i < n; i++){
-        file << name + to_string(i);
-
+        file << name[i];
         if (i < n-1){
             file << ",";
         }
     }
-
     file << endl;
 }
 
-void writeTimeStampData(ofstream &file, vector<int64> &timestamps)
+void writeTimeStampData(ofstream &file, vector<int> &timestamps)
 {
     for (int i=0; i < timestamps.size(); i++) {
         file << timestamps[i];
@@ -454,7 +447,7 @@ int main(int argc, char* argv[])
                  "OUT PATH:\n-Path to location for where to save the output files.\n-Example: --out=data/ or -o data/")
                 ("fps,f", po::value<double>(&fps)->default_value(25),
                  "FRAMES PER SECOND:\n-Frames per second for all output videos, no matter the input fps.\n-Example: --fps=25 or -f 25")
-                ("fbl,b", po::value<int>(&fbl)->default_value(10),
+                ("fbl,b", po::value<int>(&fbl)->default_value(12),
                  "FRAME BUFFER LENGTH:\n-Buffer size for holding consecutive frames. This will affect imshow latency.\n-Example: --fbl=10 or -b 10")
                 ("res,r", po::value<double>(&resize_disp_value)->default_value(0.5),
                  "RESIZE SCALER:\n-Value corresponding to how much to resize the display image.\n-Example: --res=.5 or -r .5")
@@ -549,6 +542,8 @@ int main(int argc, char* argv[])
 
     // audio objects
     int nAuds = static_cast<int>(aud_idx.size());
+    bool recAud = false;
+    if (nAuds > 0) recAud = true;
     vector<RtAudio> audio(nAuds);
     vector<AudioStruct> audio_parameters(nAuds);
     vector<RtAudio::StreamParameters> stream_parameters(nAuds);
@@ -584,29 +579,41 @@ int main(int argc, char* argv[])
         // initialize writer
         vector<VideoWriter> writeVec = initWriteDevices(capVec, file_str, fps, four_cc, file_extension);
 
-        // data writer
+        // cam data file
         ofstream cam_ts (file_str[0] + "/cameraTimeStamps_0_" + file_str[1] + ".csv");
-        writeCSVHeaders(cam_ts, "camts", nCams+1);
+        vector<string> cam_headers{"clock"};
+        for (int i=0; i < usb_idx.size(); ++i) {
+            cam_headers.push_back("usb_ts_" + to_string(usb_idx[i]));
+        }
+        for (int i=0; i < ip_url.size(); ++i) {
+            cam_headers.push_back("url_ts_" + to_string(i));
+        }
+        for (int i=1; i < nCams+1; ++i) {
+            cam_headers[i] = cam_headers[i] + "_" + to_string(i-1);
+        }
+        writeCSVHeaders(cam_ts, cam_headers);
 
-        // audio data file
-        ofstream aud_ts (file_str[0] + "/audioTimeStamps_0_" + file_str[1] + ".csv");
-        writeCSVHeaders(aud_ts, "audts", nAuds+1);
+        // audio timestamp files
+        vector<std::ofstream> aud_ts(nAuds);
+        for (int i = 0; i < nAuds; ++i) {
+            vector<string> aud_headers{"clock"};
+            aud_headers.push_back("aud_ts_" + to_string(aud_idx[i]) + "_" + to_string(i));
+            aud_ts[i].open(file_str[0] + "/audioTimeStamps_" + to_string(i) + "_" + file_str[1] + ".csv");
+            writeCSVHeaders(aud_ts[i], aud_headers);
+        }
 
-        // make buffers
+
+        // make frame and timestamp buffers
         int initBufferSize = 1;
         vector<vector<Mat>> presentBuffer(nCams, vector<Mat>(initBufferSize));
         vector<vector<Mat>> pastBuffer(nCams, vector<Mat>(initBufferSize));
         vector<vector<int>> presentTimeStamps(nCams, vector<int>(initBufferSize));
         vector<vector<int>> pastTimeStamps(nCams, vector<int>(initBufferSize));
 
-        // audio timestamps
-        vector<int64> audio_timestamps(nAuds+1, 0);
-
-        // start main clock
+        // init main clock
         time_point<high_resolution_clock> startTime;
-        startTime = high_resolution_clock::now();
 
-        // fill past buffer before main loop
+        // fill the past buffer before main loop
         int pastTick = 0;
         for (int i = 0; i < initBufferSize; i++) {
             for (int j = 0; j < nCams; j++) {
@@ -619,26 +626,32 @@ int main(int argc, char* argv[])
         }
 
         //initialize audio devices
-        if (nAuds > 0) {
+        if (recAud) {
+
+            // check if audio input devices exist
             unsigned int n_devices = audio[0].getDeviceCount();
-            cout << "Number of Audio Devices: " << n_devices-1 << endl;
+            cout << "\nNumber of Audio Devices: " << n_devices-1 << endl;
 
             if (n_devices < 1) {
                 std::cout << "\nNo audio input devices found!\n";
                 return 0;
             }
 
-            loadAudioDevices(audio_parameters, stream_parameters,
+            // load device parameters
+            audioDeviceParameters(audio_parameters, stream_parameters,
                              aud_idx, sample_rate, audio_channels,
                              audio_buffer, file_str);
 
+            // try to open audio devices
             for (int i=0; i < nAuds; ++i) {
                 try {
-                    audio[i].openStream(NULL, &stream_parameters[i], RTAUDIO_FLOAT32,
-                                        sample_rate, &audio_buffer, &recordAudio, (void *)&audio_parameters[i]);
-                    //audio[i].setStreamTime(static_cast<double>(msTimeStamp(startTime))/1000);
+                    audio[i].openStream(NULL,
+                                        &stream_parameters[i],
+                                        RTAUDIO_SINT16,
+                                        audio_parameters[i].samplerate,
+                                        &audio_parameters[i].buffersize,
+                                        &recordAudio, (void *)&audio_parameters[i]);
                     audio[i].setStreamTime(0);
-
                 }
                 catch (RtAudioError& e) {
                     e.printMessage();
@@ -647,20 +660,24 @@ int main(int argc, char* argv[])
             }
         }
 
-        // start looping through threads
+        bool START_WRITE = false;
+        // start main clock
+        startTime = high_resolution_clock::now();
+
+        // start looping through main thread
         while (true) {
 
             // hold frames and timestamps for next loop iteration
             vector<future<void>> presentBufferThread;
             presentTick = msTimeStamp(startTime); // main start timestamp
-            loopBreakTime = static_cast<double>(presentTick) + read_duration_ms-2;
+            loopBreakTime = static_cast<double>(presentTick) + read_duration_ms-1;
 
             // Start threaded buffer fill until reach end time
             for (int i = 0; i < nCams; i++) {
                 presentBuffer[i].clear();
                 presentTimeStamps[i].clear();
                 presentBufferThread.emplace_back(
-                            async(launch::async,[
+                            std::async(std::launch::async,[
                                   &capVec,
                                   &presentBuffer,
                                   &startTime,
@@ -669,10 +686,9 @@ int main(int argc, char* argv[])
                                   ](int j)
                 {
                     double currentLoopTime;
-                    for (;;) {
+                    while (true) {
                         // grab, timestamp, decode, push to buffer, check time
                         Mat placeHolderImg;
-
                         capVec[j].grab();
                         presentTimeStamps[j].emplace_back(msTimeStamp(startTime));
                         capVec[j].retrieve(placeHolderImg);
@@ -685,56 +701,53 @@ int main(int argc, char* argv[])
                 }, i));
             }
 
+            vector<future<void>> audio_ts_thread;
             if (recPosition == 1) { // if 0 then pause recording
 
-                // deal with audio data
-                if (nAuds > 0) {
-
-                    vector<future<void>> audio_ts_thread;
-
+                if (recAud) { // deal with audio data timestamps
                     for (int i=0; i < nAuds; ++i) {
-
                         // async timestamp collection
                         audio_ts_thread.emplace_back(
                                     async(launch::async,[
                                           &audio,
-                                          &audio_timestamps
+                                          &aud_ts,
+                                          &fps,
+                                          &startTime,
+                                          &loopBreakTime
                                           ](int j)
                         {
                             // start stream if not running
                             if (audio[j].isStreamOpen() && !audio[j].isStreamRunning()) {
                                 try {
                                     audio[j].startStream();
+                                    //audio[j].setStreamTime(static_cast<double>(msTimeStamp(startTime))/1000);
                                 }
                                 catch ( RtAudioError& e ) {
                                     e.printMessage();
                                 }
                             }
-                            audio_timestamps[j+1] = static_cast<int64>(round(audio[j].getStreamTime() * 1000));
+                            while (true) {
+                                waitMilliseconds(static_cast<int>(round(fps)));
+                                vector<int> ts_dat(2);
+                                ts_dat[0] = msTimeStamp(startTime);
+                                ts_dat[1] = static_cast<int>(round(audio[j].getStreamTime() * 1000));
+                                if (static_cast<double>(ts_dat[0]) >= loopBreakTime) break;
+                                writeTimeStampData(aud_ts[j], ts_dat);
+                            }
                         }, i));
                     }
-
-                    // audio timestamp since startTime
-                    audio_timestamps[0] = msTimeStamp(startTime);
-
-                    for (int i=0; i < nAuds; ++i) {
-                        audio_ts_thread[i].wait();
-                    }
-
-                    writeTimeStampData(aud_ts, audio_timestamps);
                 }
-
                 // first slot is the common time stamp, loop time
-                vector<int64> collectedCamTs(nCams+1);
+                vector<int> collectedCamTs(nCams+1);
                 showCounter = 0;
 
                 // process previous frames using timestamps
-                for (double t = static_cast<double>(pastTick);
-                     t < static_cast<double>(pastTick+read_duration_ms);
+                for (auto t = static_cast<double>(pastTick);
+                     t < static_cast<double>(pastTick)+read_duration_ms;
                      t = t+frame_duration) {
 
                     showCounter++; // for copying only the last image to view
-                    collectedCamTs[0] = static_cast<int64>(t);
+                    collectedCamTs[0] = static_cast<int>(round(t));
                     vector<future<void>> readWriteBuffer;
 
                     // write asynchronously
@@ -747,12 +760,15 @@ int main(int argc, char* argv[])
                                           &t,
                                           &writeVec,
                                           &showImages,
-                                          &showCounter
+                                          &showCounter,
+                                          &START_WRITE
                                           ](int j)
                         {
-                            int64 nearestTimeStamp = findNearestTimeStamp(t, pastTimeStamps[j]);
+                            int nearestTimeStamp = findNearestTimeStamp(t, pastTimeStamps[j]);
                             collectedCamTs[j+1] = pastTimeStamps[j][nearestTimeStamp];
-                            writeVec[j] << pastBuffer[j][nearestTimeStamp];
+                            if (START_WRITE) {
+                                writeVec[j] << pastBuffer[j][nearestTimeStamp];
+                            }
                             if (showCounter == 1) {
                                 showImages[j] = pastBuffer[j].back();
                             }
@@ -765,7 +781,7 @@ int main(int argc, char* argv[])
                     }
 
                     // write timestamp data
-                    writeTimeStampData(cam_ts, collectedCamTs);
+                    if (START_WRITE) writeTimeStampData(cam_ts, collectedCamTs);
                 }
 
             } else {
@@ -774,11 +790,23 @@ int main(int argc, char* argv[])
                     showImages[i] = pastBuffer[i].back();
                 }
 
-
-                // pause stream
-                for (int i=0; i < nAuds; ++i) {
-                    if (audio[i].isStreamOpen() && audio[i].isStreamRunning()) {
-                        audio[i].stopStream();
+                // stop all audio streams at once
+                if (recAud) {
+                    vector<future<void>> audio_pause_thread;
+                    for (int i=0; i < nAuds; ++i) {
+                        audio_pause_thread.emplace_back(
+                                    async(launch::async,[
+                                          &audio
+                                          ](int j)
+                        {
+                            // pause stream
+                            if (audio[j].isStreamOpen() && audio[j].isStreamRunning()) {
+                                audio[j].stopStream();
+                            }
+                        }, i));
+                    }
+                    for (int i=0; i < nAuds; ++i) {
+                        audio_pause_thread[i].wait();
                     }
                 }
             }
@@ -786,18 +814,28 @@ int main(int argc, char* argv[])
             // show last image from buffer
             imDisplay(window_name, showImages, disp_size_disp, grid_size_disp, resize_disp_value, recPosition);
 
-            for (int i = 0; i < nCams; i++) {
-                presentBufferThread[i].wait();
-            }
-
             if (waitKey(1) == exit_key) {
                 destroyWindow(window_name);
+                for (int i = 0; i < nCams; i++) {
+                    presentBufferThread[i].wait();
+                }
                 break;
+            }
+
+            if (recAud) {
+                for (int i=0; i < audio_ts_thread.size(); ++i) {
+                    audio_ts_thread[i].wait();
+                }
+            }
+
+            for (int i = 0; i < presentBufferThread.size(); i++) {
+                presentBufferThread[i].wait();
             }
 
             pastBuffer = presentBuffer;
             pastTick = presentTick;
             pastTimeStamps = presentTimeStamps;
+            START_WRITE = true;
         }
 
         // release video devices
@@ -809,9 +847,9 @@ int main(int argc, char* argv[])
         cam_ts.close();
 
         // close audio
-        if (nAuds > 0) {
-            aud_ts.close();
+        if (recAud) {
             for (int i=0; i < aud_idx.size(); ++i) {
+                aud_ts[i].close();
                 if (audio[i].isStreamOpen()) {
                     if (audio[i].isStreamRunning()) audio[i].stopStream();
                     audio[i].closeStream();
