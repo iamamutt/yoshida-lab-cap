@@ -3,8 +3,6 @@
 #include <sstream>
 #include <thread>
 #include <future>
-#include <chrono>
-#include <algorithm>
 #include <opencv2/opencv.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
@@ -111,7 +109,7 @@ void colorizeMat(Mat& img)
 int findNearestTimeStamp(double tick, vector<int> ticks)
 {
 	vector<double> tickDiff(ticks.size());
-	for (int i = 0; i < ticks.size(); i++)
+	for (auto i = 0; i < ticks.size(); i++)
 	{
 		tickDiff[i] = abs(static_cast<double>(ticks[i]) - tick);
 	}
@@ -610,8 +608,10 @@ int main(int argc, char* argv[])
 	}
 
 	// some additional parameters
-	double frame_duration = 1000 / fps;
+	double frame_duration = 1000.0 / fps;
 	double read_duration_ms = frame_duration * fbl;
+	int actual_read_time_ms = static_cast<int>(round(read_duration_ms));
+	int past_ts = 0;
 	int main_thread_timestamp;
 	double loop_break_time;
 	int image_display_idx;
@@ -703,7 +703,6 @@ int main(int argc, char* argv[])
 		time_point<high_resolution_clock> startTime;
 
 		// fill the past buffer before main loop
-		int pastTick = 0;
 		for (int i = 0; i < initBufferSize; i++)
 		{
 			for (int j = 0; j < n_camera_devices; j++)
@@ -742,11 +741,11 @@ int main(int argc, char* argv[])
 				try
 				{
 					audio[i].openStream(nullptr,
-					                        &stream_parameters[i],
-					                        RTAUDIO_SINT16,
-					                        audio_parameters[i].samplerate,
-					                        &audio_parameters[i].buffersize,
-					                        &audioWriter, static_cast<void *>(&audio_parameters[i]));
+					                    &stream_parameters[i],
+					                    RTAUDIO_SINT16,
+					                    audio_parameters[i].samplerate,
+					                    &audio_parameters[i].buffersize,
+					                    &audioWriter, static_cast<void *>(&audio_parameters[i]));
 					cout << "Audio stream latency " << to_string(aud_idx[i]) << ": " << audio[0].getStreamLatency() << " frames" << endl;
 					audio[i].setStreamTime(0);
 				}
@@ -758,7 +757,7 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		bool START_WRITE = false;
+		bool START_VIDEO_WRITE = false;
 		// start main clock
 		startTime = high_resolution_clock::now();
 
@@ -768,40 +767,42 @@ int main(int argc, char* argv[])
 			// hold frames and timestamps for next loop iteration
 			vector<future<void>> presentBufferThread;
 			main_thread_timestamp = msTimeStamp(startTime); // main start timestamp
-			loop_break_time = static_cast<double>(main_thread_timestamp) + read_duration_ms - 1;
+			loop_break_time = static_cast<double>(main_thread_timestamp) + read_duration_ms - (frame_duration + 1);
 
 			// Start threaded buffer fill until reach end time
 			for (int i = 0; i < n_camera_devices; i++)
 			{
-				presentBuffer[i].clear();
-				presentTimeStamps[i].clear();
-				presentBufferThread.emplace_back(
-					async(launch::async, [
-						      &capVec,
-						      &presentBuffer,
-						      &startTime,
-						      &presentTimeStamps,
-						      &loop_break_time
-					      ](int j)
-					      {
-						      double currentLoopTime;
-						      while (true)
-						      {
-							      // grab, timestamp, decode, push to buffer, check time
-							      Mat placeHolderImg;
-							      capVec[j].grab();
-							      presentTimeStamps[j].emplace_back(msTimeStamp(startTime));
-							      capVec[j].retrieve(placeHolderImg);
-							      presentBuffer[j].emplace_back(placeHolderImg.clone());
-							      currentLoopTime = static_cast<double>(msTimeStamp(startTime));
-							      if (currentLoopTime >= loop_break_time)
-							      {
-								      break;
-							      }
-						      }
-					      }, i));
-			}
 
+				presentBufferThread.emplace_back(
+				                                 async(launch::async, [
+					                                       &capVec,
+					                                       &presentBuffer,
+					                                       &startTime,
+					                                       &presentTimeStamps,
+					                                       &loop_break_time
+				                                       ](int j)
+				                                       {
+														   presentTimeStamps[j].clear();
+														   presentBuffer[j].clear();
+					                                       double currentLoopTime;
+					                                       while (true)
+					                                       {
+						                                       // grab, timestamp, decode, push to buffer, check time
+						                                       Mat placeHolderImg;
+						                                       capVec[j].grab();
+						                                       presentTimeStamps[j].emplace_back(msTimeStamp(startTime));
+						                                       capVec[j].retrieve(placeHolderImg);
+						                                       presentBuffer[j].emplace_back(placeHolderImg.clone());
+						                                       currentLoopTime = static_cast<double>(msTimeStamp(startTime));
+						                                       if (currentLoopTime > loop_break_time)
+						                                       {
+							                                       break;
+						                                       }
+					                                       }
+				                                       }, i));
+			}
+			// first slot is the common time stamp, loop time
+			vector<int> collectedCamTs(n_camera_devices + 1);
 			vector<future<void>> audio_ts_thread;
 			if (REC_SLIDER == 1)
 			{ // if 0 then pause recording
@@ -812,88 +813,86 @@ int main(int argc, char* argv[])
 					{
 						// async timestamp collection
 						audio_ts_thread.emplace_back(
-							async(launch::async, [
-								      &audio,
-								      &aud_ts,
-								      &frame_duration,
-								      &startTime,
-								      &loop_break_time
-							      ](int j)
-							      {
-								      // start stream if not running
-								      if (audio[j].isStreamOpen() && !audio[j].isStreamRunning())
-								      {
-									      try
-									      {
-										      audio[j].startStream();
-										      //audio[j].setStreamTime(static_cast<double>(msTimeStamp(startTime))/1000);
-									      }
-									      catch (RtAudioError& e)
-									      {
-										      e.printMessage();
-									      }
-								      }
-								      while (true)
-								      {
-									      waitMilliseconds(static_cast<int>(round(frame_duration / 2)));
-									      vector<int> ts_dat(2);
-									      ts_dat[0] = msTimeStamp(startTime);
-									      ts_dat[1] = static_cast<int>(round(audio[j].getStreamTime() * 1000));
-									      if (static_cast<double>(ts_dat[0]) >= loop_break_time) break;
-									      writeTimeStampData(aud_ts[j], ts_dat);
-								      }
-							      }, i));
+						                             async(launch::async, [
+							                                   &audio,
+							                                   &aud_ts,
+							                                   &frame_duration,
+							                                   &startTime,
+							                                   &loop_break_time
+						                                   ](int j)
+						                                   {
+							                                   // start stream if not running
+							                                   if (audio[j].isStreamOpen() && !audio[j].isStreamRunning())
+							                                   {
+								                                   try
+								                                   {
+									                                   audio[j].startStream();
+									                                   audio[j].setStreamTime(0);
+								                                   }
+								                                   catch (RtAudioError& e)
+								                                   {
+									                                   e.printMessage();
+								                                   }
+							                                   }
+							                                   while (true)
+							                                   {
+								                                   waitMilliseconds(static_cast<int>(round(frame_duration / 2)));
+								                                   vector<int> ts_dat(2);
+								                                   ts_dat[0] = msTimeStamp(startTime);
+								                                   ts_dat[1] = static_cast<int>(round(audio[j].getStreamTime() * 1000));
+								                                   if (static_cast<double>(ts_dat[0]) >= loop_break_time) break;
+								                                   writeTimeStampData(aud_ts[j], ts_dat);
+							                                   }
+						                                   }, i));
 					}
 				}
-				// first slot is the common time stamp, loop time
-				vector<int> collectedCamTs(n_camera_devices + 1);
+
 				image_display_idx = 0;
 
 				// process previous frames using timestamps
-				for (auto t = static_cast<double>(pastTick);
-				     t < static_cast<double>(pastTick) + read_duration_ms;
-				     t = t + frame_duration)
+				if (START_VIDEO_WRITE)
 				{
-					image_display_idx++; // for copying only the last image to view
-					collectedCamTs[0] = static_cast<int>(round(t));
-					vector<future<void>> readWriteBuffer;
-
-					// write asynchronously
-					for (int i = 0; i < n_camera_devices; i++)
+					for (auto t = past_ts;
+						t < actual_read_time_ms;
+					     t = static_cast<int>(round(t + frame_duration)))
 					{
-						readWriteBuffer.emplace_back(
-							async(launch::async, [
-								      &pastBuffer,
-								      &pastTimeStamps,
-								      &collectedCamTs,
-								      &t,
-								      &writeVec,
-								      &images_to_show,
-								      &image_display_idx,
-								      &START_WRITE
-							      ](int j)
-							      {
-								      int nearestTimeStamp = findNearestTimeStamp(t, pastTimeStamps[j]);
-								      collectedCamTs[j + 1] = pastTimeStamps[j][nearestTimeStamp];
-								      if (START_WRITE)
-								      {
-									      writeVec[j] << pastBuffer[j][nearestTimeStamp];
-								      }
-								      if (image_display_idx == 1)
-								      {
-									      images_to_show[j] = pastBuffer[j].back();
-								      }
-							      }, i));
-					}
+						collectedCamTs[0] = t;
+						vector<future<void>> readWriteBuffer;
 
-					// wait for all devices to write one frame
-					for (int i = 0; i < n_camera_devices; i++)
-					{
-						readWriteBuffer[i].wait();
-					}
+						// write asynchronously
+						for (int i = 0; i < n_camera_devices; i++)
+						{
+							readWriteBuffer.emplace_back(
+							                             async(launch::async, [
+								                                   &pastBuffer,
+								                                   &pastTimeStamps,
+								                                   &collectedCamTs,
+								                                   &t,
+								                                   &writeVec,
+								                                   &images_to_show,
+								                                   &image_display_idx
+							                                   ](int j)
+							                                   {
+								                                   auto nearestTimeStamp = findNearestTimeStamp(t, pastTimeStamps[j]);
+								                                   collectedCamTs[j + 1] = pastTimeStamps[j][nearestTimeStamp];
+								                                   writeVec[j] << pastBuffer[j][nearestTimeStamp];
+								                                   if (image_display_idx == 0)
+								                                   {
+									                                   images_to_show[j] = pastBuffer[j].back();
+								                                   }
+							                                   }, i));
+						}
 
-					// write timestamp data
-					if (START_WRITE) writeTimeStampData(cam_ts, collectedCamTs);
+						// wait for all devices to write one frame
+						for (int i = 0; i < n_camera_devices; i++)
+						{
+							readWriteBuffer[i].wait();
+						}
+
+						// write timestamp data
+						writeTimeStampData(cam_ts, collectedCamTs);
+						image_display_idx++; // for copying only the last image to view
+					}
 				}
 			}
 			else
@@ -911,16 +910,16 @@ int main(int argc, char* argv[])
 					for (int i = 0; i < n_audio_devices; ++i)
 					{
 						audio_pause_thread.emplace_back(
-							async(launch::async, [
-								      &audio
-							      ](int j)
-							      {
-								      // pause stream
-								      if (audio[j].isStreamOpen() && audio[j].isStreamRunning())
-								      {
-									      audio[j].stopStream();
-								      }
-							      }, i));
+						                                async(launch::async, [
+							                                      &audio
+						                                      ](int j)
+						                                      {
+							                                      // pause stream
+							                                      if (audio[j].isStreamOpen() && audio[j].isStreamRunning())
+							                                      {
+								                                      audio[j].stopStream();
+							                                      }
+						                                      }, i));
 					}
 					for (int i = 0; i < n_audio_devices; ++i)
 					{
@@ -935,7 +934,7 @@ int main(int argc, char* argv[])
 			if (waitKey(1) == exit_key)
 			{
 				destroyWindow(window_name);
-				for (int i = 0; i < n_camera_devices; i++)
+				for (auto i = 0; i < n_camera_devices; i++)
 				{
 					presentBufferThread[i].wait();
 				}
@@ -944,25 +943,28 @@ int main(int argc, char* argv[])
 
 			if (REC_AUDIO)
 			{
-				for (int i = 0; i < audio_ts_thread.size(); ++i)
+				for (auto i = 0; i < audio_ts_thread.size(); ++i)
 				{
 					audio_ts_thread[i].wait();
 				}
 			}
 
+
 			for (int i = 0; i < presentBufferThread.size(); i++)
 			{
 				presentBufferThread[i].wait();
 			}
-
+	
+			actual_read_time_ms = msTimeStamp(startTime);
+			past_ts = collectedCamTs[0] + static_cast<int>(round(frame_duration));
 			pastBuffer = presentBuffer;
-			pastTick = main_thread_timestamp;
 			pastTimeStamps = presentTimeStamps;
-			START_WRITE = true;
+			START_VIDEO_WRITE = true;
+
 		}
 
 		// release video devices
-		for (int i = 0; i < capVec.size(); i++)
+		for (auto i = 0; i < capVec.size(); i++)
 		{
 			writeVec[i].release();
 		}
@@ -973,7 +975,7 @@ int main(int argc, char* argv[])
 		// close audio
 		if (REC_AUDIO)
 		{
-			for (int i = 0; i < aud_idx.size(); ++i)
+			for (auto i = 0; i < aud_idx.size(); ++i)
 			{
 				aud_ts[i].close();
 				if (audio[i].isStreamOpen())
