@@ -317,9 +317,9 @@ vector<VideoWriter> initWriteDevices(vector<VideoCapture>& capDevices,
 	return vidWriteVec;
 }
 
-vector<string> makeDirectory(string& rootPath)
+string filePrefix()
 {
-	pt::ptime now = pt::second_clock::local_time();
+	auto now = pt::second_clock::local_time();
 	stringstream ts;
 	ts << now.date().year() << "_"
 		<< static_cast<int>(now.date().month()) << "_"
@@ -327,8 +327,13 @@ vector<string> makeDirectory(string& rootPath)
 		<< now.time_of_day().hours() << "_"
 		<< now.time_of_day().minutes();
 
-	string file_prefix(ts.str());
-	string folder_name = {rootPath + file_prefix};
+	string file_prefix_string(ts.str());
+	return file_prefix_string;
+}
+
+vector<string> makeDirectory(string& file_prefix, string& root_path)
+{
+	string folder_name = {root_path + file_prefix};
 
 	const fs::path boostPath(folder_name);
 
@@ -469,7 +474,7 @@ void writeCSVHeaders(ofstream& file, vector<string> name)
 	file << endl;
 }
 
-void writeTimeStampData(ofstream& file, vector<int>& timestamps)
+void writeTimeStampData(ofstream& file, vector<double>& timestamps)
 {
 	for (int i = 0; i < timestamps.size(); i++)
 	{
@@ -496,8 +501,9 @@ int main(int argc, char* argv[])
 	string window_name;
 	string four_cc;
 	string file_extension;
+	string common_prefix;
 	vector<int> aud_idx;
-	unsigned int sample_rate = 44100;
+	unsigned int sample_rate;
 	unsigned int audio_channels;
 	unsigned int audio_buffer;
 	int audio_bit_depth = 16;
@@ -518,6 +524,8 @@ int main(int argc, char* argv[])
 			 "URL ID:\n-String of the full url for IP cameras, no quotes. May be used multiple times.\n-Examples: --url=http://112.0.0.1 or -i http://...")
 			("out,o", po::value<string>(&save_path)->default_value("data/"),
 			 "OUT PATH:\n-Path to location for where to save the output files.\n-Example: --out=data/ or -o data/")
+			("cpx", po::value<string>(&common_prefix)->default_value(filePrefix()),
+			 "COMMON FILE PREFIX:\n-Typically a date and timestamp string.\n-Example: --cpx=2015_01_13")
 			("fps,f", po::value<double>(&fps)->default_value(25),
 			 "FRAMES PER SECOND:\n-Frames per second for all output videos, no matter the input fps.\n-Example: --fps=25 or -f 25")
 			("fbl,b", po::value<int>(&fbl)->default_value(12),
@@ -532,7 +540,7 @@ int main(int argc, char* argv[])
 			 "EXTENSION:\n-Lower case three letter extension/wrapper for the video file.\n-Example: --ext=m4v")
 			("aud,a", po::value<vector<int>>(),
 			 "AUDIO ID:\n-Integer value of the AUDIO device index. May be used multiple times.\n-Examples: --aud=0 or -a 1")
-			("srate", po::value<unsigned int>(&sample_rate)->default_value(44100),
+			("srate", po::value<unsigned int>(&sample_rate)->default_value(48000),
 			 "AUDIO SAMPLE RATE:\n-Sample rate for all audio input devices.\n-Example: -srate=48000")
 			("channels", po::value<unsigned int>(&audio_channels)->default_value(2),
 			 "AUDIO CHANNELS:\n-Number of channels for each audio input device.\n-Example: -channels=2")
@@ -610,8 +618,8 @@ int main(int argc, char* argv[])
 	// some additional parameters
 	double frame_duration = 1000.0 / fps;
 	double read_duration_ms = frame_duration * fbl;
-	int actual_read_time_ms = static_cast<int>(round(read_duration_ms));
-	int past_ts = 0;
+	double actual_read_time_ms = read_duration_ms;
+	double past_ts = 0.0;
 	int main_thread_timestamp;
 	double loop_break_time;
 	int image_display_idx;
@@ -661,7 +669,7 @@ int main(int argc, char* argv[])
 	if (REC_INIT)
 	{
 		// make output directory
-		vector<string> file_str = makeDirectory(save_path);
+		vector<string> file_str = makeDirectory(common_prefix, save_path);
 
 		// initialize writer
 		vector<VideoWriter> writeVec = initWriteDevices(capVec, file_str, fps, four_cc, file_extension);
@@ -805,7 +813,7 @@ int main(int argc, char* argv[])
 					      }, i));
 			}
 			// first slot is the common time stamp, loop time
-			vector<int> collectedCamTs(n_camera_devices + 1);
+			vector<double> collectedCamTs(n_camera_devices + 1);
 			vector<future<void>> audio_ts_thread;
 			if (REC_SLIDER == 1)
 			{ // if 0 then pause recording
@@ -839,10 +847,10 @@ int main(int argc, char* argv[])
 								      }
 								      while (true)
 								      {
-									      waitMilliseconds(static_cast<int>(round(frame_duration / 2)));
-									      vector<int> ts_dat(2);
-									      ts_dat[0] = msTimeStamp(startTime);
-									      ts_dat[1] = static_cast<int>(round(audio[j].getStreamTime() * 1000));
+									      waitMilliseconds(static_cast<int>(round(frame_duration)));
+									      vector<double> ts_dat(2);
+										  ts_dat[0] = static_cast<double>(msTimeStamp(startTime));
+									      ts_dat[1] = audio[j].getStreamTime() * 1000;
 									      if (static_cast<double>(ts_dat[0]) >= loop_break_time) break;
 									      writeTimeStampData(aud_ts[j], ts_dat);
 								      }
@@ -858,9 +866,9 @@ int main(int argc, char* argv[])
 				// process previous frames using timestamps
 				if (START_VIDEO_WRITE)
 				{
-					for (auto t = past_ts;
+					for (double t = past_ts;
 					     t < actual_read_time_ms;
-					     t = static_cast<int>(round(t + frame_duration)))
+					     t = t + frame_duration)
 					{
 						collectedCamTs[0] = t;
 						vector<future<void>> readWriteBuffer;
@@ -880,7 +888,7 @@ int main(int argc, char* argv[])
 								      ](int j)
 								      {
 									      auto nearestTimeStamp = findNearestTimeStamp(t, pastTimeStamps[j]);
-									      collectedCamTs[j + 1] = pastTimeStamps[j][nearestTimeStamp];
+									      collectedCamTs[j + 1] = static_cast<double>(pastTimeStamps[j][nearestTimeStamp]);
 									      writeVec[j] << pastBuffer[j][nearestTimeStamp];
 									      if (image_display_idx == 0)
 									      {
@@ -969,8 +977,8 @@ int main(int argc, char* argv[])
 			}
 
 			// average end time from all cameras
-			actual_read_time_ms = static_cast<int>(round(last_frame_timestamps / static_cast<double>(presentTimeStamps.size())));
-			past_ts = collectedCamTs[0] + static_cast<int>(round(frame_duration));
+			actual_read_time_ms = last_frame_timestamps / static_cast<double>(presentTimeStamps.size());
+			past_ts = collectedCamTs[0] + frame_duration;
 
 			// copy past and present buffers into a single vector
 			for (auto i = 0; i < presentBuffer.size(); i++)
@@ -986,16 +994,7 @@ int main(int argc, char* argv[])
 			START_VIDEO_WRITE = true;
 		}
 
-		// release video devices
-		for (auto i = 0; i < capVec.size(); i++)
-		{
-			writeVec[i].release();
-		}
-
-		// close data file
-		cam_ts.close();
-
-		// close audio
+		// close audio devices and files
 		if (REC_AUDIO)
 		{
 			for (auto i = 0; i < aud_idx.size(); ++i)
@@ -1010,9 +1009,19 @@ int main(int argc, char* argv[])
 				}
 			}
 		}
+
+		// release video writer devices
+		for (auto i = 0; i < capVec.size(); i++)
+		{
+			writeVec[i].release();
+		}
+
+		// close data file
+		cam_ts.close();
+
 	}
 
-	// release video devices
+	// release video capture devices
 	for (int i = 0; i < capVec.size(); i++)
 	{
 		capVec[i].release();
