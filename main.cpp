@@ -25,6 +25,14 @@ struct AudioStruct
 	ofstream file;
 };
 
+struct CaptureParameters
+{
+	double fps;
+	double height;
+	double width;
+	string fourcc;
+};
+
 void audioDeviceParameters(vector<AudioStruct>& aud_strct,
                            vector<RtAudio::StreamParameters>& stream_pram,
                            vector<int>& dev_vec,
@@ -183,7 +191,28 @@ Mat imDisplay(string title, vector<Mat>& imgs,
 	return out_img;
 }
 
-vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<string> url_ids, vector<Mat>& imgs)
+void setCapParameters(VideoCapture& device, CaptureParameters& prams)
+{
+	if (prams.fps != NULL)
+	{
+		device.set(CAP_PROP_FPS, prams.fps);
+	}
+	if (prams.height != NULL)
+	{
+		device.set(CAP_PROP_FRAME_HEIGHT, prams.height);
+	}
+	if (prams.width != NULL)
+	{
+		device.set(CAP_PROP_FRAME_WIDTH, prams.width);
+	}
+	if (!prams.fourcc.empty() && prams.fourcc.size() == 4)
+	{
+		auto codec = VideoWriter::fourcc(prams.fourcc[0], prams.fourcc[1], prams.fourcc[2], prams.fourcc[3]);
+		device.set(CAP_PROP_FOURCC, codec);
+	}
+}
+
+vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<string> url_ids, vector<Mat>& imgs, CaptureParameters& prams)
 {
 	size_t n_usb = usb_ids.size();
 	size_t n_url = url_ids.size();
@@ -217,6 +246,8 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
 					cerr << "Cam not found with ID: " << usb_ids[i] << endl;
 					continue;
 				}
+
+				setCapParameters(devices[device_counter], prams);
 
 				if (!devices[device_counter].grab())
 				{
@@ -261,8 +292,6 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
 					throw;
 				}
 
-				devices[device_counter].open(url_ids[i]);
-
 				if (!devices[device_counter].isOpened())
 				{
 					cerr << "Cam not found with url:\n" << url_ids[i] << endl;
@@ -282,6 +311,8 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
 					devices[device_counter].release();
 					continue;
 				}
+
+				devices[device_counter].open(url_ids[i]);
 
 				cout << "Loading of IP url successful!:\n" << url_ids[i] << endl;
 				capFail = false;
@@ -543,6 +574,10 @@ int main(int argc, char* argv[])
 	unsigned int audio_channels;
 	unsigned int audio_buffer;
 	int audio_bit_depth = 16;
+	double pram_set_fps;
+	double pram_set_height;
+	double pram_set_width;
+	string pram_set_fourcc;
 
 	try
 	{
@@ -581,7 +616,15 @@ int main(int argc, char* argv[])
 			("channels", po::value<unsigned int>(&audio_channels)->default_value(2),
 			 "AUDIO CHANNELS:\n-Number of channels for each audio input device.\n-Example: -channels=2")
 			("abuffer", po::value<unsigned int>(&audio_buffer)->default_value(256),
-			 "AUDIO BUFFER:\n-Audio buffer size.\n-Example: -abuffer=512");
+			 "AUDIO BUFFER:\n-Audio buffer size.\n-Example: -abuffer=512")
+			("CAP_PROP_FPS", po::value<double>(&pram_set_fps)->default_value(NULL),
+			 "SET CAPTURE DEVICE PARAMETER: FRAMES PER SECOND")
+			("CAP_PROP_FRAME_HEIGHT", po::value<double>(&pram_set_height)->default_value(NULL),
+			 "SET CAPTURE DEVICE PARAMETER: FRAME HEIGHT")
+			("CAP_PROP_FRAME_WIDTH", po::value<double>(&pram_set_width)->default_value(NULL),
+			 "SET CAPTURE DEVICE PARAMETER: FRAME WIDTH")
+			("CAP_PROP_FOURCC", po::value<string>(&pram_set_fourcc),
+			 "SET CAPTURE DEVICE PARAMETER: VIDEO CODEC");
 
 		po::options_description cmdline_options;
 		cmdline_options.add(generic_ops).add(config_ops);
@@ -643,6 +686,13 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
+	// pram struct
+	CaptureParameters set_cap_parameters;
+	set_cap_parameters.fps = pram_set_fps;
+	set_cap_parameters.height = pram_set_height;
+	set_cap_parameters.width = pram_set_width;
+	set_cap_parameters.fourcc = pram_set_fourcc;
+
 	// collect number if input cameras
 	auto n_camera_devices = static_cast<int>(usb_idx.size() + ip_url.size());
 	if (n_camera_devices == 0)
@@ -678,7 +728,7 @@ int main(int argc, char* argv[])
 
 	// initialize cameras, get first frames
 	vector<Mat> images_to_show(n_camera_devices);
-	vector<VideoCapture> capVec = initCapDevices(usb_idx, ip_url, images_to_show);
+	vector<VideoCapture> capVec = initCapDevices(usb_idx, ip_url, images_to_show, set_cap_parameters);
 	videoDisplaySetup(grid_size_disp, disp_size_disp, images_to_show, resize_disp_value);
 	namedWindow(window_name, WINDOW_AUTOSIZE);
 	createTrackbar("REC", window_name, &REC_SLIDER, 1, recSwitch, nullptr);
