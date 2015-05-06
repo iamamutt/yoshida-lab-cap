@@ -17,6 +17,10 @@ namespace fs = filesystem;
 namespace po = program_options;
 namespace pt = posix_time;
 
+//****************************************************
+// DECLARATIONS
+//****************************************************
+
 struct AudioStruct
 {
 	unsigned int channels;
@@ -27,11 +31,87 @@ struct AudioStruct
 
 struct CaptureParameters
 {
-	double fps;
-	double height;
-	double width;
-	string fourcc;
+	vector<double> fps;
+	vector<double> height;
+	vector<double> width;
+	vector<string> fourcc;
 };
+
+void audioDeviceParameters(vector<AudioStruct>& aud_strct,
+                           vector<RtAudio::StreamParameters>& stream_pram,
+                           vector<int>& dev_vec,
+                           unsigned int& ar, unsigned int& ac,
+                           unsigned int& ab,
+                           vector<string>& file_str);
+
+void removeDirectory(string& folder);
+
+void audioDataSize(ofstream& file);
+
+void audioHeader(ofstream& file, int& bit_depth,
+                 unsigned int& ac, unsigned int& ar);
+
+int audioWriter(void* outputBuffer, void* inputBuffer,
+                unsigned int nBufferFrames, double streamTime,
+                RtAudioStreamStatus status, void* data);
+
+void colorizeMat(Mat& img);
+
+int findNearestTimeStamp(double tick, vector<int> ticks);
+
+Mat imDisplay(string title, vector<Mat>& imgs,
+              Size& imSize, Size& gridSize, double& scaler, int& rec);
+
+vector<VideoCapture> initCapDevices(const vector<int> usb_ids,
+                                    const vector<string> url_ids,
+                                    vector<Mat>& imgs,
+                                    CaptureParameters& prams);
+
+vector<VideoWriter> initWriteDevices(vector<VideoCapture>& capDevices,
+                                     vector<string>& paths,
+                                     double& fps,
+                                     string& four_cc,
+                                     string& ext);
+
+void fillCapSetOpts(int& ncams, vector<double>& fps,
+                    vector<double>& height, vector<double>& width,
+                    vector<string>& fourcc);
+
+string filePrefix();
+
+vector<string> makeDirectory(string& file_prefix, string& root_path);
+
+void mergeMatVectors(vector<vector<Mat>>& v0,
+                     vector<vector<Mat>>& v1, vector<vector<Mat>>& v2);
+
+void mergeTimestamps(vector<vector<int>>& v0,
+                     vector<vector<int>>& v1, vector<vector<int>>& v2);
+
+int msTimestamp(time_point<high_resolution_clock>& tick);
+
+void setCapParameters(int idx, vector<VideoCapture>& device,
+                      CaptureParameters& prams);
+
+void printCapParameters(vector<VideoCapture>& device);
+
+void printTime(string idx, time_point<high_resolution_clock> ts);
+
+void recSwitch(int recPosition, void*);
+
+void removeDirectory(string& folder);
+
+void videoDisplaySetup(Size& grid, Size& imdim, vector<Mat>& imgs,
+                       double& scaler, int c_row, int c_col);
+
+void waitMilliseconds(int t);
+
+void writeCSVHeaders(ofstream& file, vector<string> name);
+
+void writeTimeStampData(ofstream& file, vector<double>& timestamps);
+
+//****************************************************
+// DEFINITIONS
+//****************************************************
 
 void audioDeviceParameters(vector<AudioStruct>& aud_strct,
                            vector<RtAudio::StreamParameters>& stream_pram,
@@ -46,8 +126,10 @@ void audioDeviceParameters(vector<AudioStruct>& aud_strct,
 		aud_strct[i].channels = ac;
 		aud_strct[i].buffersize = ab;
 		aud_strct[i].file.open(
-			            file_str[0] + "/audio_" + to_string(i) + "_16bit_" + to_string(ar) + "Hz_" + to_string(ac) + "ch_" +
-			            file_str[1] + ".wav", ios::binary);
+			            file_str[0] + "/audio_" + to_string(i) + "_16bit_" +
+			            to_string(ar) + "Hz_" + to_string(ac) + "ch_" +
+			            file_str[1] + ".wav", ios::binary
+		            );
 
 		stream_pram[i].deviceId = dev_vec[i];
 		stream_pram[i].nChannels = ac;
@@ -98,7 +180,8 @@ int audioWriter(void* outputBuffer, void* inputBuffer,
 {
 	if (status) cout << "Stream overflow detected!" << endl;
 	auto inputData = static_cast<AudioStruct *>(data);
-	inputData->file.write(static_cast<char *>(inputBuffer), sizeof(signed short) * nBufferFrames * inputData->channels);
+	inputData->file.write(static_cast<char *>(inputBuffer),
+	                      sizeof(signed short) * nBufferFrames * inputData->channels);
 	return 0;
 }
 
@@ -126,7 +209,6 @@ int findNearestTimeStamp(double tick, vector<int> ticks)
 	auto min_index = static_cast<int>(distance(tickDiff.begin(), mins));
 	return min_index;
 }
-
 
 Mat imDisplay(string title, vector<Mat>& imgs,
               Size& imSize, Size& gridSize, double& scaler, int& rec)
@@ -191,24 +273,43 @@ Mat imDisplay(string title, vector<Mat>& imgs,
 	return out_img;
 }
 
-void setCapParameters(VideoCapture& device, CaptureParameters& prams)
+void setCapParameters(int idx, vector<VideoCapture>& device, CaptureParameters& prams)
 {
-	if (prams.fps != NULL)
+	if (prams.fps[idx] != 0)
 	{
-		device.set(CAP_PROP_FPS, prams.fps);
+		device[idx].set(CAP_PROP_FPS, prams.fps[idx]);
 	}
-	if (prams.height != NULL)
+	if (prams.height[idx] != 0)
 	{
-		device.set(CAP_PROP_FRAME_HEIGHT, prams.height);
+		device[idx].set(CAP_PROP_FRAME_HEIGHT, prams.height[idx]);
 	}
-	if (prams.width != NULL)
+	if (prams.width[idx] != 0)
 	{
-		device.set(CAP_PROP_FRAME_WIDTH, prams.width);
+		device[idx].set(CAP_PROP_FRAME_WIDTH, prams.width[idx]);
 	}
-	if (!prams.fourcc.empty() && prams.fourcc.size() == 4)
+	if (prams.fourcc[idx].compare("") != 0 && prams.fourcc[idx].size() == 4)
 	{
-		auto codec = VideoWriter::fourcc(prams.fourcc[0], prams.fourcc[1], prams.fourcc[2], prams.fourcc[3]);
-		device.set(CAP_PROP_FOURCC, codec);
+		auto codec = VideoWriter::fourcc(prams.fourcc[idx][0], prams.fourcc[idx][1], prams.fourcc[idx][2], prams.fourcc[idx][3]);
+		device[idx].set(CAP_PROP_FOURCC, codec);
+	}
+}
+
+void printCapParameters(vector<VideoCapture>& device)
+{
+	for (auto i = 0; i < device.size(); ++i)
+	{
+		cout << "\ndevice " << i + 1
+			<< " capture parameter: CAP_PROP_FPS "
+			<< device[i].get(CAP_PROP_FPS) << endl;
+		cout << "device " << i + 1
+			<< " capture parameter: CAP_PROP_FRAME_HEIGHT "
+			<< device[i].get(CAP_PROP_FRAME_HEIGHT) << endl;
+		cout << "device " << i + 1
+			<< " capture parameter: CAP_PROP_FRAME_WIDTH "
+			<< device[i].get(CAP_PROP_FRAME_WIDTH) << endl;
+		cout << "device " << i + 1
+			<< " capture parameter: CAP_PROP_FOURCC "
+			<< device[i].get(CAP_PROP_FOURCC) << endl;
 	}
 }
 
@@ -241,13 +342,12 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
 
 				devices[device_counter].open(usb_ids[i]);
 
+
 				if (!devices[device_counter].isOpened())
 				{
 					cerr << "Cam not found with ID: " << usb_ids[i] << endl;
 					continue;
 				}
-
-				setCapParameters(devices[device_counter], prams);
 
 				if (!devices[device_counter].grab())
 				{
@@ -263,6 +363,8 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
 					continue;
 				}
 
+				setCapParameters(device_counter, devices, prams);
+				devices[device_counter] >> tmpImg;
 				cout << "Loading of usb device: " << usb_ids[i] << " ...successful!" << endl;
 				capFail = false;
 			}
@@ -291,6 +393,8 @@ vector<VideoCapture> initCapDevices(const vector<int> usb_ids, const vector<stri
 					cerr << "failed to open url too many times:\n" << url_ids[i] << endl;
 					throw;
 				}
+
+				devices[device_counter].open(url_ids[i]);
 
 				if (!devices[device_counter].isOpened())
 				{
@@ -347,6 +451,29 @@ vector<VideoWriter> initWriteDevices(vector<VideoCapture>& capDevices,
 	return vidWriteVec;
 }
 
+void fillCapSetOpts(int ncams, vector<double>& fps, vector<double>& height, vector<double>& width, vector<string>& fourcc)
+{
+	for (auto i = 0; i < ncams - fps.size(); ++i)
+	{
+		fps.push_back(0);
+	}
+
+	for (auto i = 0; i < ncams - height.size(); ++i)
+	{
+		height.push_back(0);
+	}
+
+	for (auto i = 0; i < ncams - width.size(); ++i)
+	{
+		width.push_back(0);
+	}
+
+	for (auto i = 0; i < ncams - fourcc.size(); ++i)
+	{
+		fourcc.push_back("");
+	}
+}
+
 string filePrefix()
 {
 	auto now = pt::second_clock::local_time();
@@ -385,13 +512,14 @@ vector<string> makeDirectory(string& file_prefix, string& root_path)
 
 void mergeMatVectors(vector<vector<Mat>>& v0, vector<vector<Mat>>& v1, vector<vector<Mat>>& v2)
 {
+	int last_length = 3;
 	for (auto i = 0; i < v0.size(); i++)
 	{
 		v0[i].clear();
 		auto size_1 = v1[i].size();
 		auto size_2 = v2[i].size();
 
-		for (auto j = size_1 - 1; j > size_1 - 3 && j >= 0; --j)
+		for (auto j = size_1 - 1; j > size_1 - last_length && j >= 0; --j)
 		{
 			v0[i].emplace_back(v1[i][j].clone());
 		}
@@ -404,13 +532,14 @@ void mergeMatVectors(vector<vector<Mat>>& v0, vector<vector<Mat>>& v1, vector<ve
 
 void mergeTimestamps(vector<vector<int>>& v0, vector<vector<int>>& v1, vector<vector<int>>& v2)
 {
+	int last_length = 3;
 	for (auto i = 0; i < v0.size(); i++)
 	{
 		v0[i].clear();
 		auto size_1 = v1[i].size();
 		auto size_2 = v2[i].size();
 
-		for (auto j = size_1 - 1; j > size_1 - 3 && j >= 0; --j)
+		for (auto j = size_1 - 1; j > size_1 - last_length && j >= 0; --j)
 		{
 			v0[i].emplace_back(v1[i][j]);
 		}
@@ -436,7 +565,7 @@ void printTime(string idx, time_point<high_resolution_clock> ts)
 
 void recSwitch(int recPosition, void*)
 {
-	cout << "\nRecording = " << recPosition << endl;
+	cout << "Recording: " << recPosition << endl;
 }
 
 void removeDirectory(string& folder)
@@ -453,14 +582,24 @@ void removeDirectory(string& folder)
 	}
 }
 
-void videoDisplaySetup(Size& grid, Size& imdim, vector<Mat>& imgs, double& scaler)
+void videoDisplaySetup(Size& grid, Size& imdim, vector<Mat>& imgs, double& scaler, int c_row, int c_col)
 {
 	// find number of images for placement
 	int n_imgs = static_cast<int>(imgs.size());
+	int n_cols;
+	int m_rows;
 
 	// calculate m rows and n cols based on num images
-	int n_cols = static_cast<int>(ceil(sqrt(n_imgs)));
-	int m_rows = static_cast<int>(ceil(static_cast<double>(n_imgs) / static_cast<double>(n_cols)));
+	if ((c_row == -1 || c_col == -1) || (c_row * c_col < n_imgs))
+	{
+		n_cols = static_cast<int>(ceil(sqrt(n_imgs)));
+		m_rows = static_cast<int>(ceil(static_cast<double>(n_imgs) / static_cast<double>(n_cols)));
+	}
+	else
+	{
+		n_cols = c_col;
+		m_rows = c_row;
+	}
 
 	// small matrix which holds x,y dims for later max function
 	Mat tmp_heights = Mat_<double>(m_rows, n_cols);
@@ -555,7 +694,14 @@ void writeTimeStampData(ofstream& file, vector<double>& timestamps)
 	file << endl;
 }
 
-int main(int argc, char* argv[])
+
+//****************************************************
+// MAIN
+//****************************************************
+
+int main(int argc, char** argv);
+
+int main(int argc, char** argv)
 {
 	// handle program options
 	string config_file;
@@ -565,19 +711,21 @@ int main(int argc, char* argv[])
 	double fps;
 	int fbl;
 	double resize_disp_value;
+	int c_row;
+	int c_col;
 	string window_name;
 	string four_cc;
 	string file_extension;
 	string common_prefix;
 	vector<int> aud_idx;
-	unsigned int sample_rate;
-	unsigned int audio_channels;
-	unsigned int audio_buffer;
+	unsigned sample_rate;
+	unsigned audio_channels;
+	unsigned audio_buffer;
 	int audio_bit_depth = 16;
-	double pram_set_fps;
-	double pram_set_height;
-	double pram_set_width;
-	string pram_set_fourcc;
+	vector<double> pram_set_fps;
+	vector<double> pram_set_height;
+	vector<double> pram_set_width;
+	vector<string> pram_set_fourcc;
 
 	try
 	{
@@ -585,46 +733,109 @@ int main(int argc, char* argv[])
 		generic_ops.add_options()
 			("help", "Show help for usage of application options")
 			("config,c", po::value<string>(&config_file)->default_value("cam_opts.cfg"),
-			 "CONFIG FILE:\n-Path to location of a configuration (.cfg) file. You can set common usage parameters in this file. Uses cam_opts.cfg by default.");
+			 "CONFIG FILE:\n-Path to location of a configuration (.cfg) file. "
+			 "You can set common usage parameters in this file. Uses cam_opts.cfg by default.");
 
 		po::options_description config_ops("Commande Line or Configuration File Options");
 		config_ops.add_options()
-			("usb,u", po::value<vector<int>>(),
-			 "USB ID:\n-Integer value of the USB camera index. May be used multiple times.\n-Examples: --usb=0 or -u 1")
-			("url,i", po::value<vector<string>>(),
-			 "URL ID:\n-String of the full url for IP cameras, no quotes. May be used multiple times.\n-Examples: --url=http://112.0.0.1 or -i http://...")
-			("out,o", po::value<string>(&save_path)->default_value("data/"),
-			 "OUT PATH:\n-Path to location for where to save the output files.\n-Example: --out=data/ or -o data/")
-			("cpx", po::value<string>(&common_prefix)->default_value(filePrefix()),
-			 "COMMON FILE PREFIX:\n-Typically a date and timestamp string.\n-Example: --cpx=2015_01_13")
-			("fps,f", po::value<double>(&fps)->default_value(25),
-			 "FRAMES PER SECOND:\n-Frames per second for all output videos, no matter the input fps.\n-Example: --fps=25 or -f 25")
-			("fbl,b", po::value<int>(&fbl)->default_value(12),
-			 "FRAME BUFFER LENGTH:\n-Buffer size for holding consecutive frames. This will affect imshow latency.\n-Example: --fbl=10 or -b 10")
-			("res,r", po::value<double>(&resize_disp_value)->default_value(0.5),
-			 "RESIZE SCALER:\n-Value corresponding to how much to resize the display image.\n-Example: --res=.5 or -r .5")
-			("win,w", po::value<string>(&window_name)->default_value("YOSHIDA-VIEW"),
-			 "WINDOW NAME:\n-Name to display at top of window.\n-Example: --win=stuff or -w stuff")
-			("codec", po::value<string>(&four_cc)->default_value("MJPG"),
-			 "CODEC:\n-Upper case four letter code for the codec used to export video.\n-Example: --codec=MP4V")
-			("ext", po::value<string>(&file_extension)->default_value("avi"),
-			 "EXTENSION:\n-Lower case three letter extension/wrapper for the video file.\n-Example: --ext=m4v")
-			("aud,a", po::value<vector<int>>(),
-			 "AUDIO ID:\n-Integer value of the AUDIO device index. May be used multiple times.\n-Examples: --aud=0 or -a 1")
-			("srate", po::value<unsigned int>(&sample_rate)->default_value(48000),
-			 "AUDIO SAMPLE RATE:\n-Sample rate for all audio input devices.\n-Example: -srate=48000")
-			("channels", po::value<unsigned int>(&audio_channels)->default_value(2),
-			 "AUDIO CHANNELS:\n-Number of channels for each audio input device.\n-Example: -channels=2")
-			("abuffer", po::value<unsigned int>(&audio_buffer)->default_value(256),
-			 "AUDIO BUFFER:\n-Audio buffer size.\n-Example: -abuffer=512")
-			("CAP_PROP_FPS", po::value<double>(&pram_set_fps)->default_value(NULL),
-			 "SET CAPTURE DEVICE PARAMETER: FRAMES PER SECOND")
-			("CAP_PROP_FRAME_HEIGHT", po::value<double>(&pram_set_height)->default_value(NULL),
-			 "SET CAPTURE DEVICE PARAMETER: FRAME HEIGHT")
-			("CAP_PROP_FRAME_WIDTH", po::value<double>(&pram_set_width)->default_value(NULL),
-			 "SET CAPTURE DEVICE PARAMETER: FRAME WIDTH")
-			("CAP_PROP_FOURCC", po::value<string>(&pram_set_fourcc),
-			 "SET CAPTURE DEVICE PARAMETER: VIDEO CODEC");
+			(
+				"usb,u",
+				po::value<vector<int>>(),
+				"USB ID: Integer value of the USB camera index. "
+				"Different APIs are in increments of 100. "
+				"May be used multiple times."
+				"\n\nExample: --usb=0 or -u 1\n\n"
+			)
+			(
+				"url,i", po::value<vector<string>>(),
+				"URL ID: String of the full url for IP cameras, no quotes. "
+				"May be used multiple times."
+				"\n\nExample: --url=http://112.0.0.1 or -i http://...\n\n"
+			)
+			(
+				"out,o", po::value<string>(&save_path)->default_value("data/"),
+				"OUT PATH: Path to location for where to save the output files."
+				"\n\nExample: --out=data/ or -o data/\n\n"
+			)
+			(
+				"cpx", po::value<string>(&common_prefix)->default_value(filePrefix()),
+				"COMMON FILE PREFIX: Typically a date and timestamp string."
+				"\n\nExample: --cpx=2015_01_13\n\n"
+			)
+			(
+				"fps,f", po::value<double>(&fps)->default_value(25),
+				"FRAMES PER SECOND: Frames per second for all output videos, "
+				" no matter the input fps."
+				"\n\nExample: --fps=25 or -f 25\n\n"
+			)
+			(
+				"fbl,b", po::value<int>(&fbl)->default_value(12),
+				"FRAME BUFFER LENGTH: Buffer size for holding consecutive "
+				"frames. This will affect imshow latency."
+				"\n\nExample: --fbl=10 or -b 10\n\n"
+			)
+			(
+				"res,r", po::value<double>(&resize_disp_value)->default_value(0.5),
+				"RESIZE SCALER: Value corresponding to how much to resize "
+				"the display image."
+				"\n\nExample: --res=.5 or -r .5\n\n"
+			)
+			(
+				"rows", po::value<int>(&c_row)->default_value(-1),
+				"CUSTOM ROWS: Number of rows for output display."
+				"\n\nExample: --rows=2\n\n"
+			)
+			(
+				"cols", po::value<int>(&c_col)->default_value(-1),
+				"CUSTOM COLUMNS: Number of cols for output display."
+				"\n\nExample: --cols=1\n\n"
+			)
+			(
+				"win,w", po::value<string>(&window_name)->default_value("YOSHIDA-VIEW"),
+				"WINDOW NAME: Name to display at top of window."
+				"\n\nExample: --win=stuff or -w stuff\n\n"
+			)
+			(
+				"codec", po::value<string>(&four_cc)->default_value("MJPG"),
+				"CODEC: Upper case four letter code for the codec "
+				"used to export video."
+				"\n\nExample: --codec=MP4V\n\n"
+			)
+			(
+				"ext", po::value<string>(&file_extension)->default_value("avi"),
+				"EXTENSION: Lower case three letter extension/wrapper "
+				"for the video file."
+				"\n\nExample: --ext=m4v\n\n"
+			)
+			(
+				"aud,a", po::value<vector<int>>(),
+				"AUDIO ID: Integer value of the AUDIO device index. "
+				"May be used multiple times."
+				"\n\nExamples: --aud=0 or -a 1\n\n"
+			)
+			(
+				"srate", po::value<unsigned>(&sample_rate)->default_value(48000),
+				"AUDIO SAMPLE RATE: Sample rate for all audio input devices."
+				"\n\nExample: -srate=48000\n\n"
+			)
+			(
+				"channels", po::value<unsigned>(&audio_channels)->default_value(2),
+				"AUDIO CHANNELS: Number of channels for each audio input device."
+				"\n\nExample: -channels=2\n\n"
+			)
+			(
+				"abuffer", po::value<unsigned>(&audio_buffer)->default_value(256),
+				"AUDIO BUFFER: Audio buffer size."
+				"\n\nExample: -abuffer=512\n\n"
+			)
+			("CAP_PROP_FPS", po::value<vector<double>>(),
+			 "cap frames per second")
+			("CAP_PROP_FRAME_HEIGHT", po::value<vector<double>>(),
+			 "cap frame height")
+			("CAP_PROP_FRAME_WIDTH", po::value<vector<double>>(),
+			 "cap frame width")
+			("CAP_PROP_FOURCC", po::value<vector<string>>(),
+			 "cap fourcc");
 
 		po::options_description cmdline_options;
 		cmdline_options.add(generic_ops).add(config_ops);
@@ -640,11 +851,10 @@ int main(int argc, char* argv[])
 		notify(vm);
 
 		ifstream ifs(config_file.c_str());
+
 		if (!ifs)
 		{
-			cout <<
-				"Could not open config file. Make sure cam_opts.cfg exists along with this program or that you specify a path to a custom .cfg file using the --cfg argument\n";
-			return 0;
+			cout << "No Config file found. This means you can only pass options through the command line" << endl;
 		}
 		else
 		{
@@ -674,6 +884,26 @@ int main(int argc, char* argv[])
 			aud_idx = vm["aud"].as<vector<int>>();
 		}
 
+		if (vm.count("CAP_PROP_FPS"))
+		{
+			pram_set_fps = vm["CAP_PROP_FPS"].as<vector<double>>();
+		}
+
+		if (vm.count("CAP_PROP_FRAME_HEIGHT"))
+		{
+			pram_set_height = vm["CAP_PROP_FRAME_HEIGHT"].as<vector<double>>();
+		}
+
+		if (vm.count("CAP_PROP_FRAME_WIDTH"))
+		{
+			pram_set_width = vm["CAP_PROP_FRAME_WIDTH"].as<vector<double>>();
+		}
+
+		if (vm.count("CAP_PROP_FOURCC"))
+		{
+			pram_set_fourcc = vm["CAP_PROP_FOURCC"].as<vector<string>>();
+		}
+
 		if (four_cc.size() != 4)
 		{
 			cout << "Please enter a codec with at least four characeters. see FOURCC.org." << endl;
@@ -686,13 +916,6 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	// pram struct
-	CaptureParameters set_cap_parameters;
-	set_cap_parameters.fps = pram_set_fps;
-	set_cap_parameters.height = pram_set_height;
-	set_cap_parameters.width = pram_set_width;
-	set_cap_parameters.fourcc = pram_set_fourcc;
-
 	// collect number if input cameras
 	auto n_camera_devices = static_cast<int>(usb_idx.size() + ip_url.size());
 	if (n_camera_devices == 0)
@@ -700,6 +923,15 @@ int main(int argc, char* argv[])
 		cout << "No camera ids or urls entered. Ending program." << endl;
 		return 0;
 	}
+
+	// pram struct
+	fillCapSetOpts(static_cast<int>(usb_idx.size()),
+	               pram_set_fps, pram_set_height, pram_set_width, pram_set_fourcc);
+	CaptureParameters set_cap_parameters;
+	set_cap_parameters.fps = pram_set_fps;
+	set_cap_parameters.height = pram_set_height;
+	set_cap_parameters.width = pram_set_width;
+	set_cap_parameters.fourcc = pram_set_fourcc;
 
 	// some additional parameters
 	double frame_duration = 1000.0 / fps;
@@ -729,7 +961,8 @@ int main(int argc, char* argv[])
 	// initialize cameras, get first frames
 	vector<Mat> images_to_show(n_camera_devices);
 	vector<VideoCapture> capVec = initCapDevices(usb_idx, ip_url, images_to_show, set_cap_parameters);
-	videoDisplaySetup(grid_size_disp, disp_size_disp, images_to_show, resize_disp_value);
+	printCapParameters(capVec);
+	videoDisplaySetup(grid_size_disp, disp_size_disp, images_to_show, resize_disp_value, c_row, c_col);
 	namedWindow(window_name, WINDOW_AUTOSIZE);
 	createTrackbar("REC", window_name, &REC_SLIDER, 1, recSwitch, nullptr);
 
@@ -740,7 +973,8 @@ int main(int argc, char* argv[])
 			capVec[i] >> images_to_show[i];
 		}
 
-		imDisplay(window_name, images_to_show, disp_size_disp, grid_size_disp, resize_disp_value, REC_SLIDER);
+		imDisplay(window_name, images_to_show, disp_size_disp,
+		          grid_size_disp, resize_disp_value, REC_SLIDER);
 
 		if (REC_SLIDER == 1)
 		{
@@ -760,7 +994,8 @@ int main(int argc, char* argv[])
 		vector<string> file_str = makeDirectory(common_prefix, save_path);
 
 		// initialize writer
-		vector<VideoWriter> writeVec = initWriteDevices(capVec, file_str, fps, four_cc, file_extension);
+		vector<VideoWriter> writeVec = initWriteDevices(capVec, file_str,
+		                                                fps, four_cc, file_extension);
 
 		// cam data file
 		ofstream cam_ts(file_str[0] + "/cameraTimeStamps_0_" + file_str[1] + ".csv");
@@ -785,7 +1020,8 @@ int main(int argc, char* argv[])
 		{
 			vector<string> aud_headers{"clock"};
 			aud_headers.push_back("aud_ts_" + to_string(aud_idx[i]) + "_" + to_string(i));
-			aud_ts[i].open(file_str[0] + "/audioTimeStamps_" + to_string(i) + "_" + file_str[1] + ".csv");
+			aud_ts[i].open(file_str[0] + "/audioTimeStamps_" +
+				to_string(i) + "_" + file_str[1] + ".csv");
 			writeCSVHeaders(aud_ts[i], aud_headers);
 		}
 
@@ -843,8 +1079,10 @@ int main(int argc, char* argv[])
 					                    audio_parameters[i].samplerate,
 					                    &audio_parameters[i].buffersize,
 					                    &audioWriter, static_cast<void *>(&audio_parameters[i]));
-					cout << "Audio stream latency " << to_string(aud_idx[i]) << ": " << audio[0].getStreamLatency() <<
-						" frames" << endl;
+					cout << "Audio stream latency "
+						<< to_string(aud_idx[i]) << ": "
+						<< audio[0].getStreamLatency()
+						<< " frames" << endl;
 					audio[i].setStreamTime(0);
 				}
 				catch (RtAudioError& e)
@@ -1030,7 +1268,8 @@ int main(int argc, char* argv[])
 			}
 
 			// show last image from buffer
-			imDisplay(window_name, images_to_show, disp_size_disp, grid_size_disp, resize_disp_value, REC_SLIDER);
+			imDisplay(window_name, images_to_show, disp_size_disp,
+			          grid_size_disp, resize_disp_value, REC_SLIDER);
 
 			if (waitKey(1) == exit_key)
 			{
@@ -1055,11 +1294,13 @@ int main(int argc, char* argv[])
 			for (int i = 0; i < presentBufferThread.size(); i++)
 			{
 				presentBufferThread[i].wait();
-				last_frame_timestamps = last_frame_timestamps + static_cast<double>(presentTimestamps[i].back());
+				last_frame_timestamps = last_frame_timestamps +
+					static_cast<double>(presentTimestamps[i].back());
 			}
 
 			// average end time from all cameras
-			actual_read_time_ms = last_frame_timestamps / static_cast<double>(presentTimestamps.size());
+			actual_read_time_ms = last_frame_timestamps /
+				static_cast<double>(presentTimestamps.size());
 
 			// start time for next write loop
 			past_ts = collectedCamTs[0] + frame_duration;
