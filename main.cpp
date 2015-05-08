@@ -1,8 +1,6 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <tuple>
-#include <stdexcept>
 #include <thread>
 #include <future>
 #include <opencv2/opencv.hpp>
@@ -1093,7 +1091,7 @@ int main(int argc, char** argv)
 	}
 
 	// collect number if input cameras
-	auto n_camera_devices = static_cast<int>(usb_idx.size() + ip_url.size());
+	unsigned auto long n_camera_devices = static_cast<int>(usb_idx.size() + ip_url.size());
 	if (n_camera_devices == 0)
 	{
 		cout << "No camera ids or urls entered. Ending program." << endl;
@@ -1126,7 +1124,7 @@ int main(int argc, char** argv)
 	double last_frame_timestamps;
 
 	// audio objects
-	int n_audio_devices = static_cast<int>(aud_idx.size());
+	unsigned long n_audio_devices = static_cast<int>(aud_idx.size());
 	bool CAPTURE_AUDIO = false;
 	if (n_audio_devices > 0) CAPTURE_AUDIO = true;
 	vector<RtAudio> audio(n_audio_devices);
