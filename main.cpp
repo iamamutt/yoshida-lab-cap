@@ -1091,7 +1091,7 @@ int main(int argc, char** argv)
 	}
 
 	// collect number if input cameras
-	unsigned auto long n_camera_devices = static_cast<int>(usb_idx.size() + ip_url.size());
+	unsigned long n_camera_devices = static_cast<int>(usb_idx.size() + ip_url.size());
 	if (n_camera_devices == 0)
 	{
 		cout << "No camera ids or urls entered. Ending program." << endl;
