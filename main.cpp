@@ -1,6 +1,8 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <tuple>
+#include <stdexcept>
 #include <thread>
 #include <future>
 #include <opencv2/opencv.hpp>
@@ -45,9 +47,6 @@ void audioDeviceParameters(
 	unsigned int& ab,
 	vector<string>& file_str);
 
-void removeDirectory(
-	string& folder);
-
 void audioDataSize(
 	ofstream& file);
 
@@ -75,8 +74,8 @@ int findNearestTimeStamp(
 Mat imDisplay(
 	string title,
 	vector<Mat>& imgs,
-	Size& imSize,
-	Size& gridSize,
+	Size& disp_dim,
+	Size& grid_layout,
 	double& scaler,
 	int& rec);
 
@@ -114,15 +113,12 @@ vector<string> makeDirectory(
 	string& file_prefix,
 	string& root_path);
 
-void mergeMatVectors(
-	vector<vector<Mat>>& v0,
-	vector<vector<Mat>>& v1,
-	vector<vector<Mat>>& v2);
-
-void mergeTimestamps(
-	vector<vector<int>>& v0,
-	vector<vector<int>>& v1,
-	vector<vector<int>>& v2);
+tuple<vector<vector<Mat>>, vector<vector<int>>> mergePastPresent(
+	vector<vector<Mat>>& past_mat,
+	vector<vector<Mat>>& present_mat,
+	vector<vector<int>>& past_ts,
+	vector<vector<int>>& present_ts,
+	int last_length);
 
 int msTimestamp(
 	time_point<high_resolution_clock>& tick);
@@ -132,7 +128,10 @@ void setCapParameters(
 	vector<VideoCapture>& device,
 	CaptureParameters& prams);
 
-void printCapParameters(
+void pauseAudioRecording(
+	vector<RtAudio>& audio);
+
+void printCapProp(
 	vector<VideoCapture>& device);
 
 void printTime(
@@ -184,10 +183,10 @@ void audioDeviceParameters(
 		aud_strct[i].channels = ac;
 		aud_strct[i].buffersize = ab;
 		aud_strct[i].file.open(
-			            file_str[0] + "/audio_" + to_string(i) + "_16bit_" +
-			            to_string(ar) + "Hz_" + to_string(ac) + "ch_" +
-			            file_str[1] + ".wav", ios::binary
-		            );
+			            file_str[0] +
+			            "/audio_" + to_string(i) +
+			            "_16bit_" + to_string(ar) + "Hz_" + to_string(ac) + "ch_" +
+			            file_str[1] + ".wav", ios::binary);
 
 		stream_pram[i].deviceId = dev_vec[i];
 		stream_pram[i].nChannels = ac;
@@ -233,8 +232,8 @@ void audioHeader(ofstream& file, int& bit_depth,
 	file.write(reinterpret_cast<char *>(&initSize), 4);
 }
 
-int audioWriter(void* outputBuffer, void* inputBuffer,
-                unsigned int nBufferFrames, double streamTime,
+int audioWriter(void* /*outputBuffer*/, void* inputBuffer,
+                unsigned int nBufferFrames, double /*streamTime*/,
                 RtAudioStreamStatus status, void* data)
 {
 	if (status) cout << "Stream overflow detected!" << endl;
@@ -270,20 +269,21 @@ int findNearestTimeStamp(double tick, vector<int> ticks)
 }
 
 Mat imDisplay(string title, vector<Mat>& imgs,
-              Size& imSize, Size& gridSize, double& scaler, int& rec)
+              Size& disp_dim, Size& grid_layout, double& scaler, int& rec)
 {
-	Mat out_img = Mat::zeros(imSize.height, imSize.width, CV_8UC3);
+	Mat out_img = Mat::zeros(disp_dim.height, disp_dim.width, CV_8UC3);
 	auto n_imgs = static_cast<int>(imgs.size());
 	int img_idx = 0;
-	int out_h_start = 0;
+	int out_h_start = 1;
 	int out_w_start;
 	int out_h_end = 0;
 	int out_w_end = 0;
+	bool no_more_imgs = false;
 
-	for (auto m = 0; m < gridSize.height; m++)
+	for (auto m = 0; m < grid_layout.height; m++)
 	{
-		out_w_start = 0;
-		for (auto n = 0; n < gridSize.width; n++)
+		out_w_start = 1;
+		for (auto n = 0; n < grid_layout.width; n++)
 		{
 			if (img_idx < n_imgs)
 			{
@@ -303,22 +303,28 @@ Mat imDisplay(string title, vector<Mat>& imgs,
 				Range out_roi_w = Range(out_w_start, out_w_end);
 				Range out_roi_h = Range(out_h_start, out_h_end);
 
-				//cout << "\n--IN RECT:" << img_idx << endl;
-				//cout << in_roi_w.start << endl;
-				//cout << in_roi_h.start << endl;
-				//cout << in_roi_w.end << endl;
-				//cout << in_roi_h.end << endl;
-				//cout << "\n--OUT RECT:" << img_idx << endl;
-				//cout << out_roi_w.start << endl;
-				//cout << out_roi_h.start << endl;
-				//cout << out_roi_w.end << endl;
-				//cout << out_roi_h.end << endl;
+				//				cout << "\n--IN RECT:" << img_idx << endl;
+				//				cout << in_roi_w.start << endl;
+				//				cout << in_roi_h.start << endl;
+				//				cout << in_roi_w.end << endl;
+				//				cout << in_roi_h.end << endl;
+				//				cout << "\n--OUT RECT:" << img_idx << endl;
+				//				cout << out_roi_w.start << endl;
+				//				cout << out_roi_h.start << endl;
+				//				cout << out_roi_w.end << endl;
+				//				cout << out_roi_h.end << endl;
 
 				in_img(in_roi_h, in_roi_w).copyTo(out_img(out_roi_h, out_roi_w));
 			}
+			else
+			{
+				no_more_imgs = true;
+			}
+			if (no_more_imgs) break;
 			img_idx++;
 			out_w_start = out_w_end + 2;
 		}
+		if (no_more_imgs) break;
 		out_h_start = out_h_end + 2;
 	}
 
@@ -353,21 +359,21 @@ void setCapParameters(int idx, vector<VideoCapture>& device, CaptureParameters& 
 	}
 }
 
-void printCapParameters(vector<VideoCapture>& device)
+void printCapProp(vector<VideoCapture>& device)
 {
 	for (auto i = 0; i < device.size(); ++i)
 	{
 		cout << "\ndevice " << i + 1
-			<< " capture parameter: CAP_PROP_FPS "
+			<< " capture property: CAP_PROP_FPS "
 			<< device[i].get(CAP_PROP_FPS) << endl;
 		cout << "device " << i + 1
-			<< " capture parameter: CAP_PROP_FRAME_HEIGHT "
+			<< " capture property: CAP_PROP_FRAME_HEIGHT "
 			<< device[i].get(CAP_PROP_FRAME_HEIGHT) << endl;
 		cout << "device " << i + 1
-			<< " capture parameter: CAP_PROP_FRAME_WIDTH "
+			<< " capture property: CAP_PROP_FRAME_WIDTH "
 			<< device[i].get(CAP_PROP_FRAME_WIDTH) << endl;
 		cout << "device " << i + 1
-			<< " capture parameter: CAP_PROP_FOURCC "
+			<< " capture property: CAP_PROP_FOURCC "
 			<< device[i].get(CAP_PROP_FOURCC) << endl;
 	}
 }
@@ -382,6 +388,8 @@ vector<VideoCapture> initCapDevices(
 	size_t n_url = url_ids.size();
 	vector<VideoCapture> devices(n_usb + n_url);
 	int device_counter = 0;
+
+	cout << "\nStarting device initialization...\n" << endl;
 
 	if (n_usb != 0)
 	{
@@ -404,7 +412,7 @@ vector<VideoCapture> initCapDevices(
 				}
 
 				devices[device_counter].open(usb_ids[i]);
-
+				setCapParameters(device_counter, devices, prams);
 
 				if (!devices[device_counter].isOpened())
 				{
@@ -426,9 +434,13 @@ vector<VideoCapture> initCapDevices(
 					continue;
 				}
 
-				setCapParameters(device_counter, devices, prams);
+				Mat tmpImg;
 				devices[device_counter] >> tmpImg;
-				cout << "Loading of usb device: " << usb_ids[i] << " ...successful!" << endl;
+				cout << "Size: H " << tmpImg.rows
+					<< " x W " << tmpImg.cols << endl;
+				cout << "Loading of usb device: " << usb_ids[i]
+					<< " ...successful!" << endl;
+
 				capFail = false;
 			}
 
@@ -441,7 +453,7 @@ vector<VideoCapture> initCapDevices(
 	{
 		for (int i = 0; i < n_url; i++)
 		{
-			cout << "\nTrying IP url:\n" << url_ids[i] << endl;
+			cout << "\nTrying URL:\n" << url_ids[i] << endl;
 
 			Mat tmpImg;
 			int capCounter = 0;
@@ -479,9 +491,11 @@ vector<VideoCapture> initCapDevices(
 					continue;
 				}
 
-				devices[device_counter].open(url_ids[i]);
-
-				cout << "Loading of IP url successful!:\n" << url_ids[i] << endl;
+				Mat tmpImg;
+				devices[device_counter] >> tmpImg;
+				cout << "Size: H " << tmpImg.rows
+					<< " x W " << tmpImg.cols << endl;
+				cout << "Loading of URL ...successful!" << endl;
 				capFail = false;
 			}
 
@@ -579,50 +593,70 @@ vector<string> makeDirectory(string& file_prefix, string& root_path)
 	return paths;
 }
 
-void mergeMatVectors(
-	vector<vector<Mat>>& v0,
-	vector<vector<Mat>>& v1,
-	vector<vector<Mat>>& v2)
+tuple<vector<vector<Mat>>, vector<vector<int>>> mergePastPresent(
+	vector<vector<Mat>>& past_mat,
+	vector<vector<Mat>>& present_mat,
+	vector<vector<int>>& past_ts,
+	vector<vector<int>>& present_ts,
+	int last_length)
 {
-	int last_length = 3;
-	for (auto i = 0; i < v0.size(); i++)
+	auto mat_size = past_mat.size();
+	auto ts_size = past_ts.size();
+
+	if (mat_size != ts_size)
 	{
-		v0[i].clear();
-		auto size_1 = v1[i].size();
-		auto size_2 = v2[i].size();
-
-		for (auto j = size_1 - 1; j > size_1 - last_length && j >= 0; --j)
-		{
-			v0[i].emplace_back(v1[i][j]);
-		}
-		for (auto k = 0; k < size_2; ++k)
-		{
-			v0[i].emplace_back(v2[i][k]);
-		}
+		throw std::length_error("N timestamps not same as N cameras");
 	}
-}
 
-void mergeTimestamps(
-	vector<vector<int>>& v0,
-	vector<vector<int>>& v1,
-	vector<vector<int>>& v2)
-{
-	int last_length = 3;
-	for (auto i = 0; i < v0.size(); i++)
+	vector<vector<Mat>> images(mat_size);
+	vector<vector<int>> timestamps(ts_size);
+
+	vector<future<void>> mat_thread;
+	vector<future<void>> ts_thread;
+
+	for (auto i = 0; i < mat_size; ++i)
 	{
-		v0[i].clear();
-		auto size_1 = v1[i].size();
-		auto size_2 = v2[i].size();
-
-		for (auto j = size_1 - 1; j > size_1 - last_length && j >= 0; --j)
-		{
-			v0[i].emplace_back(v1[i][j]);
-		}
-		for (auto k = 0; k < size_2; ++k)
-		{
-			v0[i].emplace_back(v2[i][k]);
-		}
+		mat_thread.emplace_back(
+			async(launch::async,
+			      [&images, &past_mat, &present_mat, &last_length](int ii)
+			      {
+				      auto size_mat_0 = past_mat[ii].size();
+				      for (auto j = size_mat_0 - 1;
+				           j > size_mat_0 - last_length && j >= 0;
+				           --j)
+				      {
+					      images[ii].emplace_back(past_mat[ii][j]);
+				      }
+				      for (auto j : present_mat[ii])
+				      {
+					      images[ii].emplace_back(j);
+				      }
+			      }, i));
 	}
+	for (auto i = 0; i < ts_size; ++i)
+	{
+		ts_thread.emplace_back(
+			async(launch::async,
+			      [&timestamps, &past_ts, &present_ts, &last_length](int ii)
+			      {
+				      auto size_ts_0 = past_ts[ii].size();
+				      for (auto j = size_ts_0 - 1;
+				           j > size_ts_0 - last_length && j >= 0;
+				           --j)
+				      {
+					      timestamps[ii].emplace_back(past_ts[ii][j]);
+				      }
+				      for (auto j : present_ts[ii])
+				      {
+					      timestamps[ii].emplace_back(j);
+				      }
+			      }, i));
+	}
+
+	for (auto&& i : ts_thread) i.wait();
+	for (auto&& i : mat_thread) i.wait();
+
+	return make_tuple(images, timestamps);
 }
 
 int msTimestamp(time_point<high_resolution_clock>& tick)
@@ -640,7 +674,7 @@ void printTime(string text, time_point<high_resolution_clock> ts)
 
 void recSwitch(int recPosition, void*)
 {
-	cout << "Recording: " << recPosition << endl;
+	cout << (recPosition == 0 ? "\n...Paused recording" : "\n...Recording started") << endl;
 }
 
 void frameReadThread(
@@ -659,30 +693,47 @@ void frameReadThread(
 	{
 		// grab, timestamp, decode, push to buffer, check time
 		Mat temp_frame;
-		cap[idx].grab();
+		if (!cap[idx].grab()) cout << "\ngrab failed!" << endl;
 		timestamps[idx].emplace_back(msTimestamp(start_clock));
-		cap[idx].retrieve(temp_frame);
-		frames[idx].emplace_back(temp_frame.clone());
+		if (!cap[idx].retrieve(temp_frame)) cout << "\nretrieve failed!" << endl;;
+		frames[idx].emplace_back(temp_frame);
 		currentLoopTime = static_cast<double>(msTimestamp(start_clock));
-		if (currentLoopTime > stop_clock)
-		{
-			break;
-		}
+		if (currentLoopTime > stop_clock) break;
 	}
 }
 
 void removeDirectory(string& folder)
 {
 	const fs::path boostPath(folder);
-
 	try
 	{
-		uintmax_t nr = remove_all(boostPath);
+		remove_all(boostPath);
 	}
 	catch (const fs::filesystem_error& e)
 	{
 		cerr << "Error: " << e.what() << endl;
 	}
+}
+
+void pauseAudioRecording(vector<RtAudio>& audio)
+{
+	auto n_audio = audio.size();
+	vector<future<void>> audio_pause_thread;
+	for (auto i = 0; i < n_audio; ++i)
+	{
+		audio_pause_thread.emplace_back(
+			async(launch::async, [&audio](int j)
+			      {
+				      // pause stream
+				      if (audio[j].isStreamOpen() && audio[j].isStreamRunning())
+				      {
+					      audio[j].stopStream();
+				      }
+			      }, i));
+	}
+
+	// wait for all streams to be paused
+	for (auto&& i : audio_pause_thread) i.wait();
 }
 
 void videoDisplaySetup(
@@ -759,13 +810,13 @@ void videoDisplaySetup(
 	auto max_col_it = max_element(std::begin(row_sums), std::end(row_sums));
 	img_width = *max_col_it;
 
-	imdim = Size(static_cast<int>(ceil(img_width + n_cols - 1)), static_cast<int>(ceil(img_height + m_rows - 1)));
+	imdim = Size(static_cast<int>(ceil(img_width + n_cols)), static_cast<int>(ceil(img_height + m_rows)));
 	grid = Size(n_cols, m_rows);
 
-	cout << "Display dim: "
-		<< imdim.width << " x " << imdim.height
-		<< "\nGrid size: "
-		<< grid.width << " x " << grid.height
+	cout << "\nDisplayed images frame dimensions:\n  Width="
+		<< imdim.width << ", Height=" << imdim.height
+		<< "\nGrid size:\n  Columns="
+		<< grid.width << ", Rows=" << grid.height
 		<< endl;
 }
 
@@ -818,6 +869,8 @@ int main(int argc, char** argv)
 	vector<string> ip_url;
 	string save_path;
 	double fps;
+	int min_fbl = 3;
+	int max_fbl = 128;
 	int fbl;
 	double resize_disp_value;
 	int c_row;
@@ -1020,6 +1073,18 @@ int main(int argc, char** argv)
 			cout << "Please enter a codec with at least four characeters. see FOURCC.org." << endl;
 			return 0;
 		}
+
+		if (fbl < min_fbl)
+		{
+			cout << "Minimum buffer length set to " << min_fbl << " frames" << endl;
+			fbl = min_fbl;
+		}
+
+		if (fbl > max_fbl)
+		{
+			cout << "Maximum buffer length set to " << max_fbl << " frames" << endl;
+			fbl = max_fbl;
+		}
 	}
 	catch (std::exception& e)
 	{
@@ -1054,17 +1119,16 @@ int main(int argc, char** argv)
 	bool copy_display_image;
 	int REC_SLIDER = 0;
 	bool REC_INIT = false;
-	bool START_VIDEO_WRITE = false;
+	bool WRITE_FRAMES = false;
 	int exit_key = 27;
 	Size grid_size_disp;
 	Size disp_size_disp;
-	auto initBufferSize = 1;
 	double last_frame_timestamps;
 
 	// audio objects
 	int n_audio_devices = static_cast<int>(aud_idx.size());
-	bool REC_AUDIO = false;
-	if (n_audio_devices > 0) REC_AUDIO = true;
+	bool CAPTURE_AUDIO = false;
+	if (n_audio_devices > 0) CAPTURE_AUDIO = true;
 	vector<RtAudio> audio(n_audio_devices);
 	vector<AudioStruct> audio_parameters(n_audio_devices);
 	vector<RtAudio::StreamParameters> stream_parameters(n_audio_devices);
@@ -1075,11 +1139,12 @@ int main(int argc, char** argv)
 	                                             ip_url,
 	                                             images_to_show,
 	                                             set_cap_parameters);
-	printCapParameters(capVec);
+
 	videoDisplaySetup(grid_size_disp, disp_size_disp, images_to_show,
 	                  resize_disp_value, c_row, c_col);
 	namedWindow(window_name, WINDOW_AUTOSIZE);
 	createTrackbar("REC", window_name, &REC_SLIDER, 1, recSwitch, nullptr);
+	printCapProp(capVec);
 
 	while (true)
 	{
@@ -1099,6 +1164,7 @@ int main(int argc, char** argv)
 
 		if (waitKey(static_cast<int>(frame_duration)) == exit_key)
 		{
+			cout << "\nExiting...\n" << endl;
 			break;
 		}
 	}
@@ -1114,7 +1180,8 @@ int main(int argc, char** argv)
 		                                                file_extension);
 
 		// cam data file
-		ofstream cam_ts(file_str[0] + "/cameraTimeStamps_0_" + file_str[1] + ".csv");
+		ofstream cam_ts(file_str[0] + "/cameraTimeStamps_0_" + 
+			file_str[1] + ".csv");
 		vector<string> cam_headers{"clock"};
 		for (int i = 0; i < usb_idx.size(); ++i)
 		{
@@ -1153,7 +1220,7 @@ int main(int argc, char** argv)
 		time_point<high_resolution_clock> startTime;
 
 		// fill the past buffer before main loop
-		for (int i = 0; i < initBufferSize; i++)
+		for (int i = 0; i < min_fbl; i++)
 		{
 			for (int j = 0; j < n_camera_devices; j++)
 			{
@@ -1166,7 +1233,7 @@ int main(int argc, char** argv)
 		}
 
 		//initialize audio devices
-		if (REC_AUDIO)
+		if (CAPTURE_AUDIO)
 		{
 			// check if audio input devices exist
 			unsigned int n_devices = audio[0].getDeviceCount();
@@ -1220,8 +1287,7 @@ int main(int argc, char** argv)
 			// hold frames and timestamps for next loop iteration
 			vector<future<void>> presentBufferThread;
 			main_thread_timestamp = msTimestamp(startTime); // main start timestamp
-			loop_break_time = static_cast<double>(main_thread_timestamp) +
-				read_duration_ms + 2 - (frame_duration / 2);
+			loop_break_time = static_cast<double>(main_thread_timestamp) + read_duration_ms - 1;
 
 			// Start threaded buffer fill until reach end time
 			for (auto i = 0; i < n_camera_devices; i++)
@@ -1247,9 +1313,12 @@ int main(int argc, char** argv)
 					      }, i));
 			}
 
+			// audio threads
+			vector<future<void>> audio_ts_thread;
+
 			// first slot is the common time stamp, loop time
 			vector<double> collectedCamTs(n_camera_devices + 1);
-			vector<future<void>> audio_ts_thread(n_audio_devices);
+
 			last_frame_timestamps = 0.0;
 			copy_display_image = true;
 			pastTimestamps = extendedTimestamps;
@@ -1258,12 +1327,12 @@ int main(int argc, char** argv)
 			if (REC_SLIDER == 1)
 			{ // if 0 then pause recording
 
-				if (REC_AUDIO)
-				{ // deal with audio data timestamps
+				if (CAPTURE_AUDIO) // AUDIO TS CAPTURE ROUTINE
+				{
 					for (auto i = 0; i < n_audio_devices; ++i)
 					{
 						// async timestamp collection
-						audio_ts_thread[i] = async(
+						audio_ts_thread.emplace_back(async(
 							launch::async,
 							[
 								&audio,
@@ -1280,7 +1349,6 @@ int main(int argc, char** argv)
 									try
 									{
 										audio[j].startStream();
-										audio[j].setStreamTime(0);
 									}
 									catch (RtAudioError& e)
 									{
@@ -1296,24 +1364,23 @@ int main(int argc, char** argv)
 									if (static_cast<double>(ts_dat[0]) >= loop_break_time - frame_duration + 1) break;
 									writeTimeStampData(aud_ts[j], ts_dat);
 								}
-							}, i);
+							}, i));
 					}
 				}
 
-				// process previous frames using timestamps
-				if (START_VIDEO_WRITE)
+				if (WRITE_FRAMES) // VIDEO WRITER ROUTINE
 				{
 					for (double t = past_ts;
 					     t < actual_read_time_ms;
 					     t = t + frame_duration)
 					{
 						collectedCamTs[0] = t;
-						vector<future<void>> readWriteBuffer(n_camera_devices);
+						vector<future<void>> readWriteBuffer;
 
 						// write asynchronously
 						for (auto i = 0; i < n_camera_devices; i++)
 						{
-							readWriteBuffer[i] = async(
+							readWriteBuffer.emplace_back(async(
 								launch::async,
 								[
 									&pastBuffer,
@@ -1333,7 +1400,7 @@ int main(int argc, char** argv)
 									{
 										images_to_show[j] = pastBuffer[j].back();
 									}
-								}, i);
+								}, i));
 						}
 
 						// wait for all devices to write one frame
@@ -1350,33 +1417,24 @@ int main(int argc, char** argv)
 			else // pause writing
 			{
 				// just make viewing images only
-				for (int i = 0; i < n_camera_devices; i++) images_to_show[i] = pastBuffer[i].back();
+				for (int i = 0; i < n_camera_devices; i++) images_to_show[i] = extendedBuffer[i].back().clone();
 
+				// pause all audio streams at once
+				if (CAPTURE_AUDIO) pauseAudioRecording(audio);
 
-				// stop all audio streams at once
-				if (REC_AUDIO)
+				// empty audio thread start
+				for (auto i = 0; i < n_audio_devices; ++i)
 				{
-					vector<future<void>> audio_pause_thread;
-					for (auto i = 0; i < n_audio_devices; ++i)
-					{
-						audio_pause_thread.emplace_back(
-							async(launch::async, [&audio](int j)
-							      {
-								      // pause stream
-								      if (audio[j].isStreamOpen() && audio[j].isStreamRunning())
-								      {
-									      audio[j].stopStream();
-								      }
-							      }, i));
-					}
-
-					// wait for all streams to be paused
-					for (auto&& i : audio_pause_thread) i.wait();
+					audio_ts_thread.emplace_back(async(launch::async, []()
+					                                   {
+					                                   }));
 				}
+
+				collectedCamTs[0] = actual_read_time_ms;
 			}
 
 			// initiated after first pass of presentBuffer
-			START_VIDEO_WRITE = true;
+			WRITE_FRAMES = true;
 
 			// show last image from buffer
 			imDisplay(window_name, images_to_show, disp_size_disp,
@@ -1385,16 +1443,14 @@ int main(int argc, char** argv)
 			// check for program exit on opencv window
 			if (waitKey(1) == exit_key)
 			{
+				cout << "\nExiting...\n" << endl;
 				destroyWindow(window_name);
 				for (auto&& i : presentBufferThread) i.wait();
 				break;
 			}
 
-			if (REC_AUDIO)
-			{
-				// wait for audio timestamp writers
-				for (auto&& i : audio_ts_thread) i.wait();
-			}
+			// wait for audio timestamp capture to finish
+			if (CAPTURE_AUDIO) for (auto&& i : audio_ts_thread) i.wait();
 
 			// wait for read threads to finish capturing images
 			for (int i = 0; i < presentBufferThread.size(); i++)
@@ -1416,8 +1472,9 @@ int main(int argc, char** argv)
 			past_ts = collectedCamTs[0] + frame_duration;
 
 			// combine partial old with complete new
-			mergeMatVectors(extendedBuffer, pastBuffer, presentBuffer);
-			mergeTimestamps(extendedTimestamps, pastTimestamps, presentTimestamps);
+			tie(extendedBuffer, extendedTimestamps) = mergePastPresent(
+				pastBuffer, presentBuffer,
+				pastTimestamps, presentTimestamps, min_fbl);
 		} // end main loop
 
 		//****************************************************
@@ -1425,7 +1482,7 @@ int main(int argc, char** argv)
 		//****************************************************
 
 		// close audio devices and audio files
-		if (REC_AUDIO)
+		if (CAPTURE_AUDIO)
 		{
 			for (auto i = 0; i < aud_idx.size(); ++i)
 			{
