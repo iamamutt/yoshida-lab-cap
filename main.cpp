@@ -432,7 +432,6 @@ vector<VideoCapture> initCapDevices(
 					continue;
 				}
 
-				Mat tmpImg;
 				devices[device_counter] >> tmpImg;
 				cout << "Size: H " << tmpImg.rows
 					<< " x W " << tmpImg.cols << endl;
@@ -489,7 +488,6 @@ vector<VideoCapture> initCapDevices(
 					continue;
 				}
 
-				Mat tmpImg;
 				devices[device_counter] >> tmpImg;
 				cout << "Size: H " << tmpImg.rows
 					<< " x W " << tmpImg.cols << endl;
@@ -651,8 +649,8 @@ tuple<vector<vector<Mat>>, vector<vector<int>>> mergePastPresent(
 			      }, i));
 	}
 
-	for (auto&& i : ts_thread) i.wait();
-	for (auto&& i : mat_thread) i.wait();
+	for (auto& i : ts_thread) i.wait();
+	for (auto& i : mat_thread) i.wait();
 
 	return make_tuple(images, timestamps);
 }
@@ -731,7 +729,7 @@ void pauseAudioRecording(vector<RtAudio>& audio)
 	}
 
 	// wait for all streams to be paused
-	for (auto&& i : audio_pause_thread) i.wait();
+	for (auto& i : audio_pause_thread) i.wait();
 }
 
 void videoDisplaySetup(
@@ -1091,7 +1089,7 @@ int main(int argc, char** argv)
 	}
 
 	// collect number if input cameras
-	unsigned long n_camera_devices = static_cast<int>(usb_idx.size() + ip_url.size());
+	auto n_camera_devices = usb_idx.size() + ip_url.size();
 	if (n_camera_devices == 0)
 	{
 		cout << "No camera ids or urls entered. Ending program." << endl;
@@ -1116,16 +1114,16 @@ int main(int argc, char** argv)
 	double loop_break_time;
 	bool copy_display_image;
 	int REC_SLIDER = 0;
-	bool REC_INIT = false;
-	bool WRITE_FRAMES = false;
+	auto REC_INIT = false;
+	auto WRITE_FRAMES = false;
 	int exit_key = 27;
 	Size grid_size_disp;
 	Size disp_size_disp;
 	double last_frame_timestamps;
 
 	// audio objects
-	unsigned long n_audio_devices = static_cast<int>(aud_idx.size());
-	bool CAPTURE_AUDIO = false;
+	auto n_audio_devices = aud_idx.size();
+	auto CAPTURE_AUDIO = false;
 	if (n_audio_devices > 0) CAPTURE_AUDIO = true;
 	vector<RtAudio> audio(n_audio_devices);
 	vector<AudioStruct> audio_parameters(n_audio_devices);
@@ -1146,7 +1144,7 @@ int main(int argc, char** argv)
 
 	while (true)
 	{
-		for (int i = 0; i < n_camera_devices; i++)
+		for (auto i = 0; i < n_camera_devices; i++)
 		{
 			capVec[i] >> images_to_show[i];
 		}
@@ -1181,15 +1179,15 @@ int main(int argc, char** argv)
 		ofstream cam_ts(file_str[0] + "/cameraTimeStamps_0_" + 
 			file_str[1] + ".csv");
 		vector<string> cam_headers{"clock"};
-		for (int i = 0; i < usb_idx.size(); ++i)
+		for (auto i = 0; i < usb_idx.size(); ++i)
 		{
 			cam_headers.push_back("usb_ts_" + to_string(usb_idx[i]));
 		}
-		for (int i = 0; i < ip_url.size(); ++i)
+		for (auto i = 0; i < ip_url.size(); ++i)
 		{
 			cam_headers.push_back("url_ts_" + to_string(i));
 		}
-		for (int i = 1; i < n_camera_devices + 1; ++i)
+		for (auto i = 1; i < n_camera_devices + 1; ++i)
 		{
 			cam_headers[i] = cam_headers[i] + "_" + to_string(i - 1);
 		}
@@ -1234,7 +1232,7 @@ int main(int argc, char** argv)
 		if (CAPTURE_AUDIO)
 		{
 			// check if audio input devices exist
-			unsigned int n_devices = audio[0].getDeviceCount();
+			auto n_devices = audio[0].getDeviceCount();
 			cout << "\nNumber of Audio Devices: " << n_devices - 1 << endl;
 
 			if (n_devices < 1)
@@ -1402,7 +1400,7 @@ int main(int argc, char** argv)
 						}
 
 						// wait for all devices to write one frame
-						for (auto&& i : readWriteBuffer) i.wait();
+						for (auto& i : readWriteBuffer) i.wait();
 
 						// write timestamp data
 						writeTimeStampData(cam_ts, collectedCamTs);
@@ -1415,7 +1413,7 @@ int main(int argc, char** argv)
 			else // pause writing
 			{
 				// just make viewing images only
-				for (int i = 0; i < n_camera_devices; i++) images_to_show[i] = extendedBuffer[i].back().clone();
+				for (auto i = 0; i < n_camera_devices; i++) images_to_show[i] = extendedBuffer[i].back().clone();
 
 				// pause all audio streams at once
 				if (CAPTURE_AUDIO) pauseAudioRecording(audio);
@@ -1443,12 +1441,12 @@ int main(int argc, char** argv)
 			{
 				cout << "\nExiting...\n" << endl;
 				destroyWindow(window_name);
-				for (auto&& i : presentBufferThread) i.wait();
+				for (auto& i : presentBufferThread) i.wait();
 				break;
 			}
 
 			// wait for audio timestamp capture to finish
-			if (CAPTURE_AUDIO) for (auto&& i : audio_ts_thread) i.wait();
+			if (CAPTURE_AUDIO) for (auto& i : audio_ts_thread) i.wait();
 
 			// wait for read threads to finish capturing images
 			for (int i = 0; i < presentBufferThread.size(); i++)
@@ -1497,14 +1495,14 @@ int main(int argc, char** argv)
 		}
 
 		// release video writer devices
-		for (auto&& i : writeVec) i.release();
+		for (auto& i : writeVec) i.release();
 
 		// close cam data file
 		cam_ts.close();
 	}
 
 	// release video capture devices
-	for (auto&& i : capVec) i.release();
+	for (auto& i : capVec) i.release();
 
 	// try to rm empty dir if not recording
 	//    if (REC_FLAG == false) {
