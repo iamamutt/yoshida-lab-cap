@@ -1,0 +1,8 @@
+get_cmake_property(VARNAMES_INIT_MATCHES VARIABLES)
+list(REMOVE_DUPLICATES VARNAMES_INIT_MATCHES)
+list(SORT VARNAMES_INIT_MATCHES)
+foreach (INIT_MATCH ${VARNAMES_INIT_MATCHES})
+        if (INIT_MATCH MATCHES "_INIT$")
+                message(STATUS "${INIT_MATCH}=${${INIT_MATCH}}")
+        endif ()
+endforeach ()

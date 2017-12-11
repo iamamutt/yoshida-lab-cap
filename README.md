@@ -3,46 +3,108 @@ yoshida-lab-cap
 
 ## Description
 
-A small cross-platform program that will capture multiple USB and IP cameras simultaneously and sync frames according to some common frame rate. Requires the Booost, OpenCV, and RTAudio libraries. You'll also need to add the `opencv_ffmpeg.dll` to your path or in the same folder as the release in order to write videos with non-standard codecs to a file.
+A small cross-platform program that will capture multiple USB and IP cameras simultaneously and sync frames according to some common frame rate. It also generates timestamps for samples for syncing offline, after data has been collected.
 
-The program in used primarily in our lab for syncing:
+Video sources:
 
-- Eye-tracking cameras (4 analog to usb capture cards)
-- Wall/ceiling cameras (2 Axis IP cameras)
+- multiple USB camera devices
+- multiple IP cameras
+
+Audio:
+
+- Record single input source
+- Generate audio pulses at specific frequency
+
+See the help documentation in the program for a list of options:
+
+```
+
+```
 
 ## External Dependencies
 
-- OpenCV (3.0)
-- Boost (1.58)
-- RtAudio (4.1.1)
-- cmake (3.2)
-
-### OpenCV
-
-Download at least version 3.0 BETA. You will need to install `ffmpeg` first if on OSX.
-If on Windows, the `opencv_ffmpeg300_64.dll` should already be included. You should make sure all paths to the OpenCV libraries can be found, including any third-party libraries and binaries. You can place the ffmpeg.dll in the lib folder and it should be located by cmake.
-
-### Boost
-
-Downloaded directly from the website on Windows and followed install instructions, used homebrew for OSX.
-
-I built boost on Windows using the following:
-
-`b2.exe --toolset=msvc variant=release address-model=64 link=static threading=multi runtime-link=static stage`
-
-### RtAudio
-
-Can be found here: [https://www.music.mcgill.ca/~gary/rtaudio/](https://www.music.mcgill.ca/~gary/rtaudio/)
-
-I built using cmake with the DirectSound option on Windows and the Core option on OSX.
-
-You should either create an environment variable called `RTAUDIO` which points to the built static library, or place it in a location that can be easily found, such as `/usr/local/lib` on Mac. You can also but the static library `librtaudio.a` in the lib folder from the source directory in this repository.
-
-On Windows, if using DirectSound, you will need the files `dsound.h` and the `dsound.lib`, which can be obtained from the Windows SDK.
-
-Place `RtAudio.h` in the include folder, and if on Windows, also place `dsound.h` in this folder as well.
-
-Also on Windows, place `rtaudio_static.lib` and `dsound.lib` in the lib folder.
+- OpenCV (3.3.1)
+    - You'll also need to add the `opencv_ffmpeg.dll` to your path or in the same folder as the release in order to write videos with non-standard codecs to a file (e.g., locate file from `bin/opencv_ffmpeg331_64.dll` and place in program folder.).
+- Boost (1.65.1)
+- RtAudio (5.0.0)
+    - The audio API's are system dependent. On Windows, if using DirectSound (which is the default in the cmake options), you will need the files `dsound.h` and the `dsound.lib`, which can be obtained from the Windows SDK. [https://www.music.mcgill.ca/~gary/rtaudio/apinotes.html]
+- cmake (>3.6)
 
 
+### Building dependencies from source
 
+#### Windows
+
+See the file `./tools/build_deps/windows/build_dependencies.bat`
+
+Open the `.bat` file and change the location for one of `__msvc_toolchain`,
+`__mingw_toolchain`,
+`__cygwin_toolchain` depending on which toolchain you are using.
+
+To automatically grab and unzip the source files you'll need 7-zip [http://www.7-zip.org/] and to change `__7z_exe`
+
+#### Linux
+
+Run the `.sh` files in `./tools/build_deps/linux`
+
+#### OSX
+
+I used Homebrew to grab the dependencies
+
+```
+brew install opencv
+brew install rt-audio
+brew install boost
+```
+
+# After dependencies are installed
+
+## Cmake generation
+
+You can build the program with cmake [https://cmake.org/] and by setting some cmake options to locate the libraries.
+
+Make sure cmake can be found on your path environment. Below is an example using the MinGW toolset (see `cmake -h` for other Generator names, must be installed on your system).
+
+```
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TARGET=main -DBIN_NAME=cogdevcam -DOPENCV_INSTALL_DIR=libs/opencv -DBOOST_INSTALL_DIR=libs/boost  -DRTAUDIO_INSTALL_DIR=libs/rtaudio  -G "MinGW Makefiles" ..
+```
+
+If all dependencies are in a specific folder you can use the `CUSTOM_LIB_ROOT` and `COMPILER_SUBDIR` options, where the structure is as follows: `"${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/boost"` or `"${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/opencv"` or `"${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/rtaudio"`
+
+```
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TARGET=main -DBIN_NAME=cogdevcam -DCUSTOM_LIB_ROOT=C:\Users\josep\libs -DCOMPILER_SUBDIR=gcc -G "MinGW Makefiles" ..
+```
+
+List of options:
+
+```
+ -DCUSTOM_LIB_ROOT=""
+ -DCOMPILER_SUBDIR=""
+ -DWITH_OPENCV=TRUE
+ -DOPENCV_INSTALL_DIR=libs/opencv
+ -DWITH_BOOST=TRUE
+ -DBOOST_INSTALL_DIR=libs/boost
+ -DWITH_RTAUDIO=TRUE
+ -DRTAUDIO_INSTALL_DIR=libs/rtaudio
+ -DBUILD_TARGET=main
+ -DBIN_NAME=cogdevcam
+ ```
+
+## Build/install
+
+You can build normally either via solution folders if using Visual Studio, using the generated make file, or with cmake
+
+From the build directory ...
+
+```
+cmake --build . --target install -- -j 2
+```
+
+Test that it is running by doing ...
+
+```
+cd install/bin
+cogdevcam -h
+```

@@ -1,48 +1,287 @@
-CMAKE_MINIMUM_REQUIRED( VERSION 3.0 )
+#------------------------------------------------------------------------------
+# Joseph M. Burling, 2017
+#   jmburling@ucla.edu
+#
+# -DCMAKE_BUILD_TYPE=Release
+#------------------------------------------------------------------------------
+cmake_minimum_required(VERSION 3.6.2)
+set(CMAKE_USER_MAKE_RULES_OVERRIDE "${CMAKE_CURRENT_LIST_DIR}/CompilerOptions.cmake")
+project(cogdevcam CXX)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_compile_options(-std=c++11)
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -v")
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-set(LINKLIBS)
-set(SOURCE_FILES main.cpp)
-set(BIN_NAME cogdevcam)
-set(INCLUDES include)
+#------------------------------------------------------------------------------
+# top level directories
+#
+#------------------------------------------------------------------------------
+set(PROJECT_ROOT_DIR ${CMAKE_SOURCE_DIR}/${PROJECT_NAME})
+set(PROJECT_INCLUDE_DIRS ${PROJECT_ROOT_DIR}/include)
+set(PROJECT_SRC_FILES ${PROJECT_ROOT_DIR}/src)
 
-project(HY_LAB_CAM_SYNC)
+#------------------------------------------------------------------------------
+# System info
+#
+#------------------------------------------------------------------------------
+set(PROJECT_COMPILER ${CMAKE_CXX_COMPILER_ID}) #Clang, GNU, MSVC, AppleClang
+set(SYS_NAME ${CMAKE_SYSTEM_NAME})
 
-set(Boost_USE_STATIC_LIBS    ON)
-set(Boost_USE_MULTITHREADED  ON)
-set(Boost_USE_STATIC_RUNTIME ON)
+if (WIN32)
+        set(USER_LIB_ROOT_DEFAULT "$ENV{USERPROFILE}")
+        set(COMPILER_SUBDIR_DEFAULT ${PROJECT_COMPILER})
+else ()
+        set(USER_LIB_ROOT_DEFAULT "/usr/local")
+        set(COMPILER_SUBDIR_DEFAULT ".")
+endif ()
+#------------------------------------------------------------------------------
+# Cmake variables.
+#  -DWITH_OPENCV=TRUE -DWITH_BOOST=TRUE -DWITH_RTAUDIO=TRUE
+#------------------------------------------------------------------------------
 
-find_package(OpenCV REQUIRED)
-find_package(Boost 1.55.0 COMPONENTS program_options REQUIRED system REQUIRED filesystem REQUIRED date_time REQUIRED)
+# -DCUSTOM_LIB_ROOT=""
+set(CUSTOM_LIB_ROOT ${USER_LIB_ROOT_DEFAULT}/lib CACHE PATH
+    "OPTIONAL. Root path to where custom built libraries are located, e.g. /usr/local or C:/Users/username/libs")
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-    find_library(RTAUDIO rtaudio_static HINTS $ENV{RTAUDIO} lib NO_DEFAULT_PATH)
-    find_library(DSOUND dsound lib)
-    list(APPEND LINKLIBS ${RTAUDIO} ${DSOUND})
-    list(APPEND SOURCE_FILES include/dsound.h)
-    include_directories(${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS} ${INCLUDES})
-elseif (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    find_library(RTAUDIO rtaudio_static HINTS usr/local/lib $ENV{RTAUDIO} lib)
-    find_library(COREAUDIO_LIB CoreAudio)
-    find_library(COREFOUNDATION_LIB CoreFoundation)
-    list(APPEND LINKLIBS ${RTAUDIO} ${COREAUDIO_LIB} ${COREFOUNDATION_LIB})
-    include_directories(${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS} ${INCLUDES})
-endif()
+# -DCOMPILER_SUBDIR=""
+set(COMPILER_SUBDIR ${COMPILER_SUBDIR_DEFAULT} CACHE STRING
+    "OPTIONAL. Name of subfolder that contains compiler specific libraries.")
 
-link_directories(${Boost_LIBRARY_DIRS})
-add_executable(${BIN_NAME} ${SOURCE_FILES})
-target_link_libraries( ${BIN_NAME} ${OpenCV_LIBS} ${Boost_LIBRARIES} ${LINKLIBS})
+# -DWITH_OPENCV=TRUE
+set(WITH_OPENCV TRUE CACHE BOOL
+    "Toggle ON/OFF OpenCV")
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-set(CMAKE_BUILD_TYPE Release)
+# -DOPENCV_INSTALL_DIR=libs/opencv
+set(OPENCV_INSTALL_DIR "${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/opencv" CACHE PATH
+    "Root path where OpenCV libraries are installed")
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-    set(CMAKE_CXX_FLAGS_RELEASE "/MT")
-    set(CMAKE_CXX_FLAGS_DEBUG "/MTd")
-endif()
+# -DWITH_BOOST=TRUE
+set(WITH_BOOST TRUE CACHE BOOL
+    "Toggle ON/OFF Boost")
 
+# -DBOOST_INSTALL_DIR=libs/boost
+set(BOOST_INSTALL_DIR "${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/boost" CACHE PATH
+    "Root path where Boost libraries are installed")
 
+# -DWITH_RTAUDIO=TRUE
+set(WITH_RTAUDIO TRUE CACHE BOOL
+    "Toggle ON/OFF RtAudio")
 
-# cmake -G "Visual Studio 12 2013 Win64"
+# -DRTAUDIO_INSTALL_DIR=libs/rtaudio
+set(RTAUDIO_INSTALL_DIR "${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/rtaudio" CACHE PATH
+    "Root path where compiled RtAudio library is installed")
+
+# -DBUILD_TARGET=main
+set(BUILD_TARGET main CACHE STRING
+    "Target file to build from the folder: ${PROJECT_NAME}/install")
+
+# -DBIN_NAME=myProgam
+set(BIN_NAME ${BUILD_TARGET} CACHE STRING
+    "Name of executable")
+
+#------------------------------------------------------------------------------
+# Project source files and targets.
+#
+#------------------------------------------------------------------------------
+set(SRC_FILES_LIST "${PROJECT_SRC_FILES}/${BUILD_TARGET}.cpp")
+get_filename_component(TARGET_FILENAME ${SRC_FILES_LIST} NAME)
+string(REGEX REPLACE "\\.[^.]*$" "" TARG_EXEC_NAME ${TARGET_FILENAME})
+message("\nConfiguring target: ${TARG_EXEC_NAME} from ${TARGET_FILENAME} as ${BIN_NAME}\n")
+file(GLOB SRC_FILES_SEARCH LIST_DIRECTORIES false "${PROJECT_SRC_FILES}/*.cpp")
+list(APPEND ${SRC_FILES_LIST} ${SRC_FILES_SEARCH})
+
+#------------------------------------------------------------------------------
+# Windows specific stuff
+#
+#------------------------------------------------------------------------------
+if (WIN32)
+        set(WIN_SDK_DIR_HINT "C:/Program Files (x86)/Windows Kits")
+        if (MSVC)
+                set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD ON)
+                set(CMAKE_CXX_FLAGS_RELEASE "/MT /O2 /Ob2 /DNDEBUG")
+                set(CMAKE_CXX_FLAGS_DEBUG "/MTd /Zi /Ob0 /Od /RTC1")
+                set(CMAKE_CXX_FLAGS_MINSIZEREL "/MT /O1 /Ob1 /DNDEBUG")
+        endif ()
+endif ()
+
+#------------------------------------------------------------------------------
+# Boost Modules
+#   Some modules need to be built and are not header only. See README.md
+#------------------------------------------------------------------------------
+if (WITH_BOOST)
+        set(Boost_NO_BOOST_CMAKE ON)
+        set(Boost_USE_STATIC_LIBS ON)
+        set(Boost_USE_STATIC_RUNTIME ON)
+        set(Boost_DETAILED_FAILURE_MSG ON)
+        set(Boost_USE_MULTITHREADED ON)
+        set(Boost_ADDITIONAL_VERSIONS 106000 106500 106501)
+        set(BOOST_ROOT ${BOOST_INSTALL_DIR}) # also set $ENV{BOOST_ROOT}
+        add_definitions(-DBOOST_ALL_NO_LIB)
+        if (WIN32 OR MINGW)
+                set(Boost_NO_SYSTEM_PATHS ON)
+                file(GLOB BOOST_LIBRARY_SEARCH "${BOOST_INSTALL_DIR}/lib")
+                file(GLOB BOOST_INCLUDE_SEARCH "${BOOST_INSTALL_DIR}/include/boost*")
+                set(BOOST_LIBRARYDIR "${BOOST_LIBRARY_SEARCH}")
+                set(BOOST_INCLUDEDIR "${BOOST_INCLUDE_SEARCH}")
+        endif ()
+        find_package(Boost 1.60 REQUIRED COMPONENTS program_options filesystem system date_time)
+        if (NOT Boost_FOUND)
+                message(FATAL_ERROR "Boost not found!")
+        endif ()
+
+        list(APPEND PROJECT_INCLUDE_DIRS ${Boost_INCLUDE_DIRS})
+endif ()
+
+#------------------------------------------------------------------------------
+# OpenCV Library
+#   Set environment variable OpenCV_DIR to directory where opencv was installed
+#   Look for files OpenCVConfig.cmake and cmake_install.cmake in staticlibs
+#------------------------------------------------------------------------------
+if (WITH_OPENCV)
+        find_package(OpenCV REQUIRED HINTS ${OPENCV_INSTALL_DIR})
+        if (NOT OPENCV_CORE_FOUND)
+                message(FATAL_ERROR "OpenCV Libraries not found!")
+        endif ()
+
+        list(APPEND PROJECT_INCLUDE_DIRS ${OpenCV_INCLUDE_DIRS})
+endif ()
+
+#------------------------------------------------------------------------------
+# RTAudio
+#
+#------------------------------------------------------------------------------
+if (WITH_RTAUDIO)
+        set(RtAudio_EXTERN_LIST)
+
+        if (WIN32)
+                # RtAudio library
+                find_library(RtAudio_STATIC_LIBRARIES NAMES librtaudio_static
+                             HINTS "$ENV{RTAUDIO_DIR}" "${RTAUDIO_INSTALL_DIR}" PATH_SUFFIXES lib)
+
+                # Compiled RtAudio with DirectSound support needs shared Windows dsound library
+                find_library(DSound_SHARED_LIB dsound HINTS ${WIN_SDK_DIR_HINT})
+
+                # RtAudio and header
+                find_path(RtAudio_INCLUDE_DIRS RtAudio.h HINTS
+                          $ENV{RTAUDIO_DIR} ${RTAUDIO_INSTALL_DIR}
+                          PATH_SUFFIXES include)
+
+                if (NOT RtAudio_STATIC_LIBRARIES)
+                        message(FATAL_ERROR "RtAudio compiled library --with-ds not found!")
+                endif ()
+
+                if (NOT RtAudio_INCLUDE_DIRS)
+                        message(FATAL_ERROR "RtAudio.h source file not found!")
+                endif ()
+
+                if (NOT DSound_SHARED_LIB)
+                        message(FATAL_ERROR "dsound library not found!")
+                endif ()
+
+                # Link static RtAudio lib
+                add_library(RtAudio_STATIC_LIBRARIES STATIC IMPORTED GLOBAL)
+                set_target_properties(RtAudio_STATIC_LIBRARIES PROPERTIES
+                                      IMPORTED_LOCATION "${RtAudio_STATIC_LIB}"
+                                      IMPORTED_IMPLIB "${RtAudio_STATIC_LIB}"
+                                      INSTALL_RPATH "${RtAudio_STATIC_LIB}"
+                                      INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+                # Save RtAudio header file and include directory
+                list(APPEND PROJECT_INCLUDE_DIRS ${RtAudio_INCLUDE_DIRS})
+
+                # include path and library for dsound
+                list(APPEND RtAudio_EXTERN_LIST ${DSound_SHARED_LIB})
+                file(GLOB_RECURSE DSound_INCLUDE_FILE LIST_DIRECTORIES false "${WIN_SDK_DIR_HINT}/**/*/dsound.h")
+                get_filename_component(DSound_INCLUDE_DIRS DSound_INCLUDE_FILE DIRECTORY)
+                find_path(DSound_INCLUDE_DIRS NAMES DSound_INCLUDE_FILE)
+                list(APPEND PROJECT_INCLUDE_DIRS ${DSound_INCLUDE_DIRS})
+        endif ()
+
+        if (UNIX AND NOT APPLE) # ${CMAKE_HOST_SYSTEM_NAME} STREQUAL "Linux"
+                find_package(PkgConfig REQUIRED)
+                pkg_check_modules(RtAudio REQUIRED rtaudio)
+
+                if (NOT RtAudio_FOUND)
+                        find_library(RtAudio_STATIC_LIBRARIES NAMES librtaudio.a
+                                     HINTS /usr/local "$ENV{RTAUDIO_DIR}" "${RTAUDIO_INSTALL_DIR}" PATH_SUFFIXES lib)
+
+                        find_path(RtAudio_INCLUDE_DIRS RtAudio.h HINTS /usr/local/include
+                                  $ENV{RTAUDIO_DIR} ${RTAUDIO_INSTALL_DIR}
+                                  PATH_SUFFIXES rtaudio)
+                endif ()
+
+                if (NOT RtAudio_STATIC_LIBRARIES)
+                        message(FATAL_ERROR "RtAudio library not found!")
+                endif ()
+
+                if (NOT RtAudio_INCLUDE_DIRS)
+                        message(FATAL_ERROR "RtAudio header not found!")
+                endif ()
+
+                list(APPEND PROJECT_INCLUDE_DIRS ${RtAudio_INCLUDE_DIRS})
+        endif ()
+
+        if (APPLE)
+                # brew install rt-audio
+                find_library(RtAudio_STATIC_LIBRARIES NAMES rtaudio
+                             HINTS usr/local/lib "$ENV{RTAUDIO_DIR}" "${RTAUDIO_INSTALL_DIR}")
+                if (RtAudio_STATIC_LIBRARIES)
+                        if (APPLE)
+                                find_library(COREAUDIO_LIB CoreAudio)
+                                find_library(COREFOUNDATION_LIB CoreFoundation)
+                                list(APPEND RtAudio_EXTERN_LIST ${COREAUDIO_LIB} ${COREFOUNDATION_LIB})
+                        else ()
+                                message(FATAL_ERROR "RtAudio compiled library --with-core not found!")
+                        endif ()
+                endif ()
+        endif ()
+endif ()
+
+#------------------------------------------------------------------------------
+# Finish up
+#   To build VS solution. cd to new directory vsbuild, then:
+#     cmake .. -G "Visual Studio 15 2017 Win64"
+#------------------------------------------------------------------------------
+include_directories(${PROJECT_INCLUDE_DIRS})
+
+message(STATUS "Sources:")
+foreach (COLLECTED_SRC_FILE ${SRC_FILES_LIST})
+        message("\t- ${COLLECTED_SRC_FILE}")
+endforeach (COLLECTED_SRC_FILE)
+foreach (COLLECTED_SRC_DIR ${PROJECT_INCLUDE_DIRS})
+        message("\t- ${COLLECTED_SRC_DIR}")
+endforeach (COLLECTED_SRC_DIR)
+
+add_executable(${TARG_EXEC_NAME} ${SRC_FILES_LIST})
+set_target_properties(${TARG_EXEC_NAME} PROPERTIES OUTPUT_NAME "${BIN_NAME}")
+
+if (WITH_BOOST)
+        target_link_libraries(${TARG_EXEC_NAME} ${Boost_LIBRARIES})
+else ()
+        unset(BOOST_INSTALL_DIR CACHE)
+        unset(Boost_LIBRARIES CACHE)
+endif ()
+
+if (WITH_OPENCV)
+        target_link_libraries(${TARG_EXEC_NAME} ${OpenCV_LIBS})
+else ()
+        unset(OPENCV_INSTALL_DIR CACHE)
+        unset(OpenCV_LIBS CACHE)
+endif ()
+
+if (WITH_RTAUDIO)
+        target_link_libraries(${TARG_EXEC_NAME} ${RtAudio_STATIC_LIBRARIES} ${RtAudio_EXTERN_LIST})
+else ()
+        unset(RTAUDIO_INSTALL_DIR CACHE)
+        unset(RtAudio_STATIC_LIBRARIES CACHE)
+        unset(RtAudio_EXTERN_LIST CACHE)
+endif ()
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/build/install.d")
+else ()
+        set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/build/install")
+endif ()
+
+install(TARGETS ${TARG_EXEC_NAME}
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib/static)
