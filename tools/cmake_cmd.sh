@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+cmake -DBUILD_TARGET=base -DBIN_NAME=cogdev -DCMAKE_BUILD_TYPE=Release -DWITH_RTAUDIO=1 -DWITH_OPENCV=1 -DWITH_BOOST=1
