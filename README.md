@@ -67,14 +67,14 @@ Make sure cmake can be found on your path environment. Below is an example using
 
 ```
 mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TARGET=main -DBIN_NAME=cogdevcam -DOPENCV_INSTALL_DIR=libs/opencv -DBOOST_INSTALL_DIR=libs/boost  -DRTAUDIO_INSTALL_DIR=libs/rtaudio  -G "MinGW Makefiles" ..
+cmake -DCMAKE_BUILD_TYPE=Release -DOPENCV_INSTALL_DIR=libs/opencv -DBOOST_INSTALL_DIR=libs/boost  -DRTAUDIO_INSTALL_DIR=libs/rtaudio  -G "MinGW Makefiles" ..
 ```
 
 If all dependencies are in a specific folder you can use the `CUSTOM_LIB_ROOT` and `COMPILER_SUBDIR` options, where the structure is as follows: `"${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/boost"` or `"${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/opencv"` or `"${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/rtaudio"`
 
 ```
 mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TARGET=main -DBIN_NAME=cogdevcam -DCUSTOM_LIB_ROOT=C:\Users\josep\libs -DCOMPILER_SUBDIR=gcc -G "MinGW Makefiles" ..
+cmake -DCMAKE_BUILD_TYPE=Release -DCUSTOM_LIB_ROOT=C:\Users\josep\libs -DCOMPILER_SUBDIR=gcc -G "MinGW Makefiles" ..
 ```
 
 List of options:
@@ -88,7 +88,7 @@ List of options:
  -DBOOST_INSTALL_DIR=libs/boost
  -DWITH_RTAUDIO=TRUE
  -DRTAUDIO_INSTALL_DIR=libs/rtaudio
- -DBUILD_TARGET=main
+ -DBUILD_TESTS=TRUE
  -DBIN_NAME=cogdevcam
  ```
 

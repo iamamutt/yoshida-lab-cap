@@ -16,7 +16,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #------------------------------------------------------------------------------
 set(PROJECT_ROOT_DIR ${CMAKE_SOURCE_DIR}/${PROJECT_NAME})
 set(PROJECT_INCLUDE_DIRS ${PROJECT_ROOT_DIR}/include)
-set(PROJECT_SRC_FILES ${PROJECT_ROOT_DIR}/src)
+set(PROJECT_TEST_FILES ${PROJECT_ROOT_DIR}/tests)
+set(MAIN_EXEC_FILE "${PROJECT_ROOT_DIR}/main.cpp")
 
 #------------------------------------------------------------------------------
 # System info
@@ -69,24 +70,13 @@ set(WITH_RTAUDIO TRUE CACHE BOOL
 set(RTAUDIO_INSTALL_DIR "${CUSTOM_LIB_ROOT}/${COMPILER_SUBDIR}/rtaudio" CACHE PATH
     "Root path where compiled RtAudio library is installed")
 
-# -DBUILD_TARGET=main
-set(BUILD_TARGET main CACHE STRING
-    "Target file to build from the folder: ${PROJECT_NAME}/install")
+# -DBUILD_TESTS=TRUE
+set(BUILD_TESTS TRUE CACHE BOOL
+    "Build small test programs")
 
 # -DBIN_NAME=myProgam
-set(BIN_NAME ${BUILD_TARGET} CACHE STRING
+set(BIN_NAME cogdevcam CACHE STRING
     "Name of executable")
-
-#------------------------------------------------------------------------------
-# Project source files and targets.
-#
-#------------------------------------------------------------------------------
-set(SRC_FILES_LIST "${PROJECT_SRC_FILES}/${BUILD_TARGET}.cpp")
-get_filename_component(TARGET_FILENAME ${SRC_FILES_LIST} NAME)
-string(REGEX REPLACE "\\.[^.]*$" "" TARG_EXEC_NAME ${TARGET_FILENAME})
-message("\nConfiguring target: ${TARG_EXEC_NAME} from ${TARGET_FILENAME} as ${BIN_NAME}\n")
-file(GLOB SRC_FILES_SEARCH LIST_DIRECTORIES false "${PROJECT_SRC_FILES}/*.cpp")
-list(APPEND ${SRC_FILES_LIST} ${SRC_FILES_SEARCH})
 
 #------------------------------------------------------------------------------
 # Windows specific stuff
@@ -241,34 +231,35 @@ endif ()
 #     cmake .. -G "Visual Studio 15 2017 Win64"
 #------------------------------------------------------------------------------
 include_directories(${PROJECT_INCLUDE_DIRS})
-
-message(STATUS "Sources:")
-foreach (COLLECTED_SRC_FILE ${SRC_FILES_LIST})
-        message("\t- ${COLLECTED_SRC_FILE}")
-endforeach (COLLECTED_SRC_FILE)
 foreach (COLLECTED_SRC_DIR ${PROJECT_INCLUDE_DIRS})
         message("\t- ${COLLECTED_SRC_DIR}")
 endforeach (COLLECTED_SRC_DIR)
 
-add_executable(${TARG_EXEC_NAME} ${SRC_FILES_LIST})
-set_target_properties(${TARG_EXEC_NAME} PROPERTIES OUTPUT_NAME "${BIN_NAME}")
+set(EXEC_OUTPUT_NAMES ${BIN_NAME})
+if (BUILD_TESTS)
+        list(APPEND EXEC_OUTPUT_NAMES test_video)
+        add_executable(test_video "${PROJECT_TEST_FILES}/test_video.cpp")
+        target_link_libraries(test_video ${OpenCV_LIBS})
+endif ()
+
+add_executable(${BIN_NAME} ${MAIN_EXEC_FILE})
 
 if (WITH_BOOST)
-        target_link_libraries(${TARG_EXEC_NAME} ${Boost_LIBRARIES})
+        target_link_libraries(${BIN_NAME} ${Boost_LIBRARIES})
 else ()
         unset(BOOST_INSTALL_DIR CACHE)
         unset(Boost_LIBRARIES CACHE)
 endif ()
 
 if (WITH_OPENCV)
-        target_link_libraries(${TARG_EXEC_NAME} ${OpenCV_LIBS})
+        target_link_libraries(${BIN_NAME} ${OpenCV_LIBS})
 else ()
         unset(OPENCV_INSTALL_DIR CACHE)
         unset(OpenCV_LIBS CACHE)
 endif ()
 
 if (WITH_RTAUDIO)
-        target_link_libraries(${TARG_EXEC_NAME} ${RtAudio_STATIC_LIBRARIES} ${RtAudio_EXTERN_LIST})
+        target_link_libraries(${BIN_NAME} ${RtAudio_STATIC_LIBRARIES} ${RtAudio_EXTERN_LIST})
 else ()
         unset(RTAUDIO_INSTALL_DIR CACHE)
         unset(RtAudio_STATIC_LIBRARIES CACHE)
@@ -281,7 +272,7 @@ else ()
         set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/build/install")
 endif ()
 
-install(TARGETS ${TARG_EXEC_NAME}
+install(TARGETS ${EXEC_OUTPUT_NAMES}
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib/static)

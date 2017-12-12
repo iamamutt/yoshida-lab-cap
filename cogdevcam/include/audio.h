@@ -342,14 +342,14 @@ class CallbackTimestamps
     CallbackTimestamps() = default;
 
   public:
-    AudioTimeFile        file;
-    AudioClock           master_clock;
-    AudioClock           stream_clock;
-    AudioTimeType        stream_ts     = 0;
-    AudioTimeType        master_ts     = 0;
-    size_t               flush_buffer  = 1;
-    uint64_t             buffer_sample = 1;
-    futures::FutureState future;
+    AudioTimeFile         file;
+    AudioClock            master_clock;
+    AudioClock            stream_clock;
+    AudioTimeType         stream_ts     = 0;
+    AudioTimeType         master_ts     = 0;
+    size_t                flush_buffer  = 1;
+    uint64_t              buffer_sample = 1;
+    futures::SharedFuture future;
 
     explicit CallbackTimestamps(const timing::TimePoint &tp,
                                 unsigned                 sample_rate,
@@ -357,7 +357,7 @@ class CallbackTimestamps
                                 double                   time_threshold)
       : master_clock(tp),
         stream_clock(tp),
-        future(futures::makeFutureValid()),
+        future(futures::makeVoidFutureValid<futures::SharedFuture>()),
         timeout_reached(static_cast<double>(timeout_interval)),
         timeout_thresh(static_cast<double>(timeout_interval * time_threshold))
     {
@@ -1353,7 +1353,7 @@ class Streams : public StreamData
     start(double start_time = -1)
     {
         if (!use_audio) return;
-        if (main_audio.isStreamOpen())
+        if (isOpen())
         {
             if (main_audio.isStreamRunning())
             {
@@ -1379,7 +1379,7 @@ class Streams : public StreamData
     stop(bool close_stream = false)
     {
         if (!use_audio) return;
-        if (main_audio.isStreamOpen())
+        if (isOpen())
         {
             if (main_audio.isStreamRunning())
             {
@@ -1410,8 +1410,9 @@ class Streams : public StreamData
     toggleSave(bool save_state, double start_time = -1)
     {
         if (!use_audio) return;
+        if (callback.write == save_state) return;
         if (verbose) std::cout << "\nChanging save state.\n";
-        if (main_audio.isStreamOpen())
+        if (isOpen())
         {
             stop();
             callback.write = save_state;
@@ -1434,15 +1435,29 @@ class Streams : public StreamData
     };
 
     bool
-    running()
+    isRunning()
     {
         if (!use_audio) return false;
+        if (!isOpen()) return false;
         if (callback.aborted)
         {
             close();
             return false;
         }
         return main_audio.isStreamRunning();
+    };
+
+    bool
+    isOpen()
+    {
+        if (!use_audio) return false;
+        return main_audio.isStreamOpen();
+    };
+
+    uint64_t
+    getBufferCount()
+    {
+        return callback.ts.buffer_sample;
     };
 
   private:
@@ -1502,7 +1517,7 @@ class Streams : public StreamData
               &callback,
               &options,
               nullptr);
-            if (main_audio.isStreamOpen())
+            if (isOpen())
             {
                 std::cout
                   << "\n  - output_device: " << playback.deviceId
@@ -1530,6 +1545,7 @@ class Streams : public StreamData
         if (sec >= 0) main_audio.setStreamTime(sec);
         auto stream_time_now = main_audio.getStreamTime();
         callback.ts.streamSync(stream_time_now);
+        callback.ts.update();
         return stream_time_now;
     };
 

@@ -142,12 +142,6 @@ int Runtime::static_error = 0;
 };  // namespace err
 
 namespace misc {
-template<typename T>
-bool
-future_ready(std::future<T> const &futr)
-{
-    return futr.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-}
 
 std::string
 strAppend(const std::initializer_list<std::string> &strings,
@@ -320,15 +314,28 @@ printTime(const std::string &                                         text,
 };
 
 void
-removeDirectory(std::string &folder)
+removeDirectory(const std::string &folder)
 {
-    const boost::filesystem::path boostPath(folder);
     try
     {
+        boost::filesystem::path boostPath(folder);
         boost::filesystem::remove_all(boostPath);
-    } catch (const boost::filesystem::filesystem_error &e)
+    } catch (boost::filesystem::filesystem_error &error)
     {
-        std::cerr << "Error: " << e.what() << "\n";
+        throw err::Runtime(error);
+    }
+};
+
+void
+removeFile(const std::string &path)
+{
+    try
+    {
+        boost::filesystem::path boostPath(path);
+        boost::filesystem::remove(boostPath);
+    } catch (boost::filesystem::filesystem_error &error)
+    {
+        throw err::Runtime(error);
     }
 };
 
@@ -769,16 +776,19 @@ test_time(const timing::Float_t &wait_sec, size_t n = 500)
 
 namespace futures {
 
-using FutureState = std::shared_future<void>;
+using SharedFuture = std::shared_future<void>;
+using UniqueFuture = std::future<void>;
 
+template<typename Future>
 void
-futureWait(const FutureState &_future)
+futureWait(const Future &_future)
 {
     _future.wait();
 };
 
+template<typename Future>
 bool
-futureStatus(const FutureState &_future)
+futureStatus(const Future &_future)
 {
     auto valid = _future.valid();
     if (valid)
@@ -789,8 +799,9 @@ futureStatus(const FutureState &_future)
     return valid;
 };
 
+template<typename Future>
 void
-futureValidWait(const FutureState &_future)
+futureValidWait(const Future &_future)
 {
     if (_future.valid())
     {
@@ -798,13 +809,24 @@ futureValidWait(const FutureState &_future)
     }
 };
 
-FutureState
-makeFutureValid()
+template<typename Future>
+Future
+makeVoidFutureValid()
 {
-    FutureState _future;
+    Future _future;
     _future = std::async(std::launch::async, []() {});
     return _future;
 }
+
+template<typename Future, typename T>
+Future
+makeFutureValid()
+{
+    Future _future;
+    _future = std::async(std::launch::async, []() { return T(); });
+    return _future;
+}
+
 };  // namespace futures
 
 #endif  // __COGDEVCAM_TOOLS_H

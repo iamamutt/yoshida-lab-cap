@@ -184,6 +184,7 @@ struct audio
 /// Contains user defined video options and defaults
 struct video
 {
+    bool                     video_sync           = false;
     size_t                   n_usb                = 0;
     size_t                   n_url                = 0;
     size_t                   n_devices            = 0;
@@ -191,13 +192,13 @@ struct video
     std::string              four_cc              = "HYUV";
     std::string              video_container_ext  = ".avi";
     double                   frames_per_second    = 30;
-    int                      frame_buffer_length  = 12;
+    size_t                   display_feed_fps     = 12;
     std::string              display_feed_name    = "VIDEO_FEED";
     double                   display_feed_scale   = 0.5;
     unsigned int             display_feed_rows    = 0;
     unsigned int             display_feed_cols    = 0;
     int                      min_frame_buffer_len = 2;
-    int                      max_frame_buffer_len = 120;
+    int                      max_frame_buffer_len = 30;
     std::vector<int>         device_ids;
     std::vector<std::string> ip_urls;
     std::vector<double>      set_capture_fps;
@@ -251,9 +252,16 @@ checkConfigFile(param::data::base &main, const std::string &config_arg = "cfg")
         if (config_file_stream)
         {
             // if file exists
-            po::store(
-              po::parse_config_file(config_file_stream, main.main), main.map);
-            po::notify(main.map);
+            try
+            {
+                po::store(po::parse_config_file(config_file_stream, main.main),
+                          main.map);
+                po::notify(main.map);
+            } catch (const std::exception &err)
+            {
+                std::cerr << err.what() << "\n";
+                err::Runtime("Error reading config file");
+            }
         }
     }
 };
@@ -633,6 +641,14 @@ class Video : virtual public Foundation
     videoHelpList()
     {
         // Application param: Video
+        helper::newBoolOption(video.help,
+                              "vsync",
+                              video.store.video_sync,
+                              "VIDEO SYNCHRONIZATION: "
+                              "Use the FPS value as a common frame rate."
+                              "\n\n  e.g., --vsync or -s 1",
+                              "s");
+
         helper::newVectorOption<std::vector<int>>(
           video.help,
           "usb",
@@ -677,15 +693,14 @@ class Video : virtual public Foundation
           "no matter the input fps."
           "\n\n  e.g., --fps=25, -f 30\n",
           "f");
-        helper::newDefaultOption<int>(
+        helper::newDefaultOption<size_t>(
           video.help,
-          "fbl",
-          video.store.frame_buffer_length,
-          "FRAME BUFFER LENGTH: "
-          "Buffer size for holding consecutive frames. "
+          "dfps",
+          video.store.display_feed_fps,
+          "DISPLAY UPDATE FRAMES PER SEC: "
+          "How often to display last captured frames. "
           "This will affect imshow latency."
-          "\n\n  e.g., --fbl=10 or -b 10\n",
-          "b");
+          "\n\n  e.g., --dfps=10\n");
         helper::newDefaultOption<size_t>(
           video.help,
           "vtries",
@@ -775,6 +790,12 @@ class Video : virtual public Foundation
         video.store.n_usb     = video.store.device_ids.size();
         video.store.n_devices = video.store.device_ids.size() +
                                 video.store.ip_urls.size();
+
+        if (video.store.video_sync && video.store.frames_per_second <= 0)
+        {
+            video.store.frames_per_second = 30.0;
+            std::cerr << "Cannot sync video with 0 FPS\n";
+        }
         if (video.store.device_ids.empty())
         {
             video.store.device_ids.emplace_back(-1);
@@ -807,25 +828,21 @@ class Video : virtual public Foundation
                   "Please enter a codec with at least four characters. "
                   "see FOURCC.org.");
             }
-            if (video.store.frame_buffer_length <
-                video.store.min_frame_buffer_len)
+            if (video.store.display_feed_fps < video.store.min_frame_buffer_len)
             {
                 misc::strPrint(
                   {"Warning. Minimum buffer length set to",
                    std::to_string(video.store.min_frame_buffer_len),
                    "frames"});
-                video.store.frame_buffer_length = video.store
-                                                    .min_frame_buffer_len;
+                video.store.display_feed_fps = video.store.min_frame_buffer_len;
             }
-            if (video.store.frame_buffer_length >
-                video.store.max_frame_buffer_len)
+            if (video.store.display_feed_fps > video.store.max_frame_buffer_len)
             {
                 misc::strPrint(
                   {"Warning. Maximum buffer length set to",
                    std::to_string(video.store.max_frame_buffer_len),
                    "frames"});
-                video.store.frame_buffer_length = video.store
-                                                    .max_frame_buffer_len;
+                video.store.display_feed_fps = video.store.max_frame_buffer_len;
             }
         }
     };

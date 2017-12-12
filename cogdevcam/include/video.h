@@ -18,7 +18,8 @@
 #include <vector>
 
 namespace video {
-using VideoDuration = std::chrono::duration<double, timing::milli>;
+using VideoTimeType = double;
+using VideoDuration = std::chrono::duration<VideoTimeType, timing::milli>;
 using VideoClock    = timing::Clock<VideoDuration>;
 
 class Properties;
@@ -35,10 +36,10 @@ class Properties
 
     explicit Properties(cv::VideoCapture &reader) { merge(reader); };
 
-    explicit Properties(std::string _fourcc,
-                        double      _fps          = 0,
-                        int         _frame_width  = 0,
-                        int         _frame_height = 0)
+    explicit Properties(const std::string &_fourcc,
+                        double             _fps          = 0,
+                        int                _frame_width  = 0,
+                        int                _frame_height = 0)
     {
         merge(_fourcc, _fps, _frame_width, _frame_height);
     };
@@ -126,7 +127,7 @@ class Properties
 
   private:
     std::string __fourcc       = "MJPG";
-    double      __fps          = 240.0;
+    double      __fps          = 30.0;
     int         __frame_height = 480;
     int         __frame_width  = 640;
 
@@ -314,8 +315,7 @@ struct VideoFile
 class Timestamps
 {
   public:
-    using timets_t = typename VideoClock::ctype;
-    Timestamps()   = default;
+    Timestamps() = default;
 
     void
     setClock(timing::TimePoint start_time_ms)
@@ -327,17 +327,18 @@ class Timestamps
     openTimestampStream(VideoFile file_info)
     {
         copyTimestampFileInfo(file_info);
-        filename         = timestamp_file_info.full_path;
+        ts_filename      = timestamp_file_info.full_path;
         std::string stem = timestamp_file_info.stem.empty() ?
                              "" :
                              timestamp_file_info.stem + "/";
-        if (filename.empty())
+        if (ts_filename.empty())
         {
-            filename = timestamp_file_info.folder + "/" + stem + "video_ts" +
-                       misc::zeroPadStr(file_info.index) + ".txt";
+            ts_filename = timestamp_file_info.folder + "/" + stem + "video_ts" +
+                          misc::zeroPadStr(file_info.index);
         }
-        misc::makeDirectory(filename);
-        std::ofstream ts_stream(filename);
+        ts_filename = ts_filename + ".ts";
+        misc::makeDirectory(ts_filename);
+        std::ofstream ts_stream(ts_filename);
         ts_stream << std::fixed << std::setprecision(5);
         timestamp_stream = std::move(ts_stream);
     };
@@ -348,7 +349,7 @@ class Timestamps
         return write_timestmaps && timestamp_stream.is_open();
     };
 
-    timets_t
+    VideoTimeType
     getTimestamp()
     {
         return timestamp_timer.elapsed();
@@ -364,7 +365,7 @@ class Timestamps
     };
 
     void
-    writeTime(timets_t ts = 0)
+    writeTime(VideoTimeType ts = 0)
     {
         if (!write_timestmaps) return;
         if (ts != 0) ts = getTimestamp();
@@ -375,6 +376,12 @@ class Timestamps
     useTimestampWriter() const
     {
         return write_timestmaps;
+    }
+
+    std::string
+    getTimestampFilename() const
+    {
+        return ts_filename;
     }
 
   protected:
@@ -394,7 +401,7 @@ class Timestamps
   private:
     video::VideoClock timestamp_timer;
     VideoFile         timestamp_file_info;
-    std::string       filename;
+    std::string       ts_filename;
     std::ofstream     timestamp_stream;
     bool              write_timestmaps = false;
 };
@@ -411,17 +418,17 @@ class Reader
     explicit Reader(const std::string &_input)
       : is_usb(false), dev_id_str(_input), dev_id(_input){};
 
-    cv::Mat
+    std::shared_ptr<cv::Mat>
     readImage()
     {
         readNextFrame();
-        return mat;
+        return shared_mat;
     };
 
     uint64_t
-    frame() const
+    getReaderFrame() const
     {
-        return frameNumber;
+        return frame_number;
     }
 
     void
@@ -442,8 +449,8 @@ class Reader
             cap_failed = false;
             std::cout << "\n\nSUCCESS!\n\n";
             read_props.merge(read_props);
-            read_props.frame_width  = mat.cols;
-            read_props.frame_height = mat.rows;
+            read_props.frame_width  = shared_mat->cols;
+            read_props.frame_height = shared_mat->rows;
             std::cout << "Size:  W=" << read_props.frame_width
                       << ", H=" << read_props.frame_height << "\n";
             break;
@@ -451,7 +458,7 @@ class Reader
 
         if (cap_failed)
         {
-            throw err::Runtime("Failed too many times trying to open device!");
+            throw err::Runtime("Failed too many times trying to read device!");
         }
     };
 
@@ -478,18 +485,19 @@ class Reader
     };
 
   private:
-    bool             is_usb      = true;
-    int              dev_id_int  = -1;
-    std::string      dev_id_str  = "";
-    std::string      dev_id      = "";
-    uint64_t         frameNumber = 0;
-    cv::Mat          mat;
-    Properties       read_props;
-    cv::VideoCapture reader;
+    bool                     is_usb       = true;
+    int                      dev_id_int   = -1;
+    std::string              dev_id_str   = "";
+    std::string              dev_id       = "";
+    uint64_t                 frame_number = 0;
+    std::shared_ptr<cv::Mat> shared_mat;
+    Properties               read_props;
+    cv::VideoCapture         reader;
 
     bool
     openCaptureDevice()
     {
+        shared_mat  = std::make_shared<cv::Mat>(cv::Mat());
         bool opened = false;
         if (!reader.isOpened())
         {
@@ -499,7 +507,9 @@ class Reader
         if (!opened)
         {
             std::cerr << "Cam not detected with input:\n " << dev_id << "\n";
+            reader.release();
         }
+
         return opened;
     };
 
@@ -514,7 +524,7 @@ class Reader
                           << dev_id << "\n";
                 return false;
             }
-            if (!reader.retrieve(mat))
+            if (!reader.retrieve(*shared_mat))
             {
                 std::cerr << "Frame was not decoded successfully for device:\n "
                           << dev_id << "\n";
@@ -524,7 +534,7 @@ class Reader
         {
             return false;
         }
-        frameNumber++;
+        ++frame_number;
         return true;
     };
 };
@@ -568,6 +578,7 @@ class Writer
     {
         if (!use_writer || !writer.isOpened()) return;
         writer.write(img);
+        frame_number += 1;
     };
 
     void
@@ -591,6 +602,18 @@ class Writer
         return writer_file_info;
     }
 
+    uint64_t
+    getWriterFrame() const
+    {
+        return frame_number;
+    }
+
+    std::string
+    getWriterFilename() const
+    {
+        return video_out_vid_file;
+    }
+
   protected:
     Writer() = default;
 
@@ -606,7 +629,9 @@ class Writer
     Properties      write_props;
     cv::VideoWriter writer;
     VideoFile       writer_file_info;
+    uint64_t        frame_number = 0;
 
+  private:
     void
     setWriterStream(VideoFile file_info)
     {
@@ -658,8 +683,9 @@ class IO
   , public Reader
   , public Writer
 {
-    timets_t last_ts = 0;
-    cv::Mat  last_img;
+    VideoTimeType            last_ts = 0;
+    std::shared_ptr<cv::Mat> last_img;
+    bool                     io_opened = false;
 
   protected:
     IO() = default;
@@ -693,6 +719,13 @@ class IO
         auto capture_device_props = getReaderProperties(true);
         openWriter(capture_device_props);
         if (useTimestampWriter()) openTimestampStream(getTimestampFileInfo());
+        io_opened = true;
+    };
+
+    bool
+    isOpen() const
+    {
+        return io_opened;
     };
 
     void
@@ -701,36 +734,43 @@ class IO
         closeReader();
         closeWriter();
         closeTime();
+        io_opened = false;
     };
 
     void
     read()
     {
-        last_ts  = getTimestamp();
         last_img = readImage();
+        last_ts  = getTimestamp();
+    };
+
+    cv::Mat
+    readTemp()
+    {
+        return readImage()->clone();
     };
 
     void
     write()
     {
-        writeImage(last_img);
+        writeImage(*last_img);
         if (useTimestampWriter()) writeTime(last_ts);
     };
 
     void
-    write(cv::Mat &img, timets_t t = 0)
+    write(cv::Mat &img, VideoTimeType &t)
     {
         writeImage(img);
         if (useTimestampWriter()) writeTime(t);
     };
 
     cv::Mat
-    getLastImage() const
+    getLastImage()
     {
-        return last_img;
+        return *last_img;
     }
 
-    timets_t
+    VideoTimeType
     getLastImageTime() const
     {
         return last_ts;
@@ -750,9 +790,11 @@ makeVideoFile(const opts::Pars &options, int index, std::string url = "")
     return vid_file;
 };
 
+template<typename C>
 void
-setVideoTimeFile(std::vector<video::IO> &videos, const timing::Clock<> &clock)
+setVideoTimeFile(std::vector<video::IO> &videos, const timing::Clock<C> &clock)
 {
+    if (videos.empty()) return;
     for (auto &vid : videos)
     {
         vid.setTimestamp(vid.getVideoFileInfo(), clock.getStartTime());
@@ -762,6 +804,7 @@ setVideoTimeFile(std::vector<video::IO> &videos, const timing::Clock<> &clock)
 void
 setVideoProperties(std::vector<video::IO> &videos, const opts::Pars &options)
 {
+    if (videos.empty()) return;
     std::vector<video::Properties> cap_props(
       videos.size(), video::Properties());
     std::vector<video::Properties> write_props(
@@ -791,286 +834,36 @@ setVideoProperties(std::vector<video::IO> &videos, const opts::Pars &options)
     }
 };
 
+template<typename C>
 std::vector<video::IO>
-multiIO(const opts::Pars &options, const timing::Clock<> &clock)
+multiIO(const opts::Pars &options, const timing::Clock<C> &clock)
 {
     std::vector<video::IO> video_devices;
-    for (auto id : options.video.device_ids)
+    for (auto u = 0; u < options.video.n_usb; ++u)
     {
-        video::VideoFile vid_file = makeVideoFile(options, id);
-        video_devices.emplace_back(video::IO(id, vid_file));
+        int usb_id = options.video.device_ids[u];
+        if (usb_id >= 0)
+        {
+            video::VideoFile vid_file = makeVideoFile(options, usb_id);
+            video_devices.emplace_back(video::IO(usb_id, vid_file));
+        }
     }
-    int url_count = 0;
-    for (const auto &id : options.video.ip_urls)
+    for (auto l = 0; l < options.video.n_url; ++l)
     {
-        video::VideoFile vid_file = makeVideoFile(options, ++url_count, id);
-        video_devices.emplace_back(video::IO(id, vid_file));
+        std::string ip_url = options.video.ip_urls[l];
+        if (!ip_url.empty())
+        {
+            video::VideoFile vid_file = makeVideoFile(options, l, ip_url);
+            video_devices.emplace_back(video::IO(ip_url, vid_file));
+        }
     }
-
     setVideoProperties(video_devices, options);
     setVideoTimeFile(video_devices, clock);
 
     return video_devices;
 };
-
 };  // namespace factory
 
-void videoDisplaySetup(cv::Size &           grid,
-                       cv::Size &           imdim,
-                       std::vector<cv::Mat> imgs,
-                       double &             scaler,
-                       int                  c_row,
-                       int                  c_col);
-
-void colorizeMat(cv::Mat &img);
-
-cv::Mat imDisplay(const std::string &  title,
-                  std::vector<cv::Mat> imgs,
-                  cv::Size &           disp_dim,
-                  cv::Size &           grid_layout,
-                  double &             scaler,
-                  int &                rec);
-
-void recSwitch(int recPosition, void *);
-
-void frameReadThread(
-  int                                                         idx,
-  std::vector<std::vector<cv::Mat>> &                         frames,
-  std::vector<std::vector<int>> &                             timestamps,
-  std::vector<cv::VideoCapture> &                             cap,
-  std::chrono::time_point<std::chrono::high_resolution_clock> start_clock,
-  double                                                      stop_clock);
-
-void
-frameReadThread(
-  int                                                         idx,
-  std::vector<std::vector<cv::Mat>> &                         frames,
-  std::vector<std::vector<int>> &                             timestamps,
-  std::vector<cv::VideoCapture> &                             cap,
-  std::chrono::time_point<std::chrono::high_resolution_clock> start_clock,
-  double                                                      stop_clock)
-{
-    timestamps[idx].clear();
-    frames[idx].clear();
-    double currentLoopTime;
-    while (true)
-    {
-        // grab, timestamp, decode, push to buffer, check time
-        cv::Mat temp_frame;
-        if (!cap[idx].grab())
-        {
-            std::cout << "\ngrab failed!"
-                      << "\n";
-        }
-        timestamps[idx].emplace_back(misc::msTimestamp(start_clock));
-        if (!cap[idx].retrieve(temp_frame))
-        {
-            std::cout << "\nretrieve failed!"
-                      << "\n";
-        };
-        frames[idx].emplace_back(temp_frame);
-        currentLoopTime = static_cast<double>(misc::msTimestamp(start_clock));
-        if (currentLoopTime > stop_clock)
-        {
-            break;
-        }
-    }
-}
-
-cv::Mat
-imDisplay(const std::string &  title,
-          std::vector<cv::Mat> imgs,
-          cv::Size &           disp_dim,
-          cv::Size &           grid_layout,
-          double &             scaler,
-          int &                rec)
-{
-    cv::Mat out_img = cv::Mat::zeros(disp_dim.height, disp_dim.width, CV_8UC3);
-    auto    n_imgs  = static_cast<int>(imgs.size());
-    int     img_idx = 0;
-    int     out_h_start = 1;
-    int     out_w_start;
-    int     out_h_end    = 0;
-    int     out_w_end    = 0;
-    bool    no_more_imgs = false;
-    for (auto m = 0; m < grid_layout.height; m++)
-    {
-        out_w_start = 1;
-        for (auto n = 0; n < grid_layout.width; n++)
-        {
-            if (img_idx < n_imgs)
-            {
-                cv::Mat in_img;
-                resize(imgs[img_idx],
-                       in_img,
-                       cv::Size(),
-                       scaler,
-                       scaler,
-                       cv::INTER_NEAREST);
-                cv::Size in_img_sz  = in_img.size();
-                out_h_end           = out_h_start + (in_img_sz.height - 1);
-                out_w_end           = out_w_start + (in_img_sz.width - 1);
-                cv::Range in_roi_h  = cv::Range(0, in_img_sz.height - 1);
-                cv::Range in_roi_w  = cv::Range(0, in_img_sz.width - 1);
-                cv::Range out_roi_w = cv::Range(out_w_start, out_w_end);
-                cv::Range out_roi_h = cv::Range(out_h_start, out_h_end);
-
-                //				cout << "\n--IN RECT:" << img_idx << endl;
-                //				cout << in_roi_w.start << endl;
-                //				cout << in_roi_h.start << endl;
-                //				cout << in_roi_w.end << endl;
-                //				cout << in_roi_h.end << endl;
-                //				cout << "\n--OUT RECT:" << img_idx << endl;
-                //				cout << out_roi_w.start << endl;
-                //				cout << out_roi_h.start << endl;
-                //				cout << out_roi_w.end << endl;
-                //				cout << out_roi_h.end << endl;
-
-                in_img(in_roi_h, in_roi_w).copyTo(out_img(out_roi_h, out_roi_w));
-            } else
-            {
-                no_more_imgs = true;
-            }
-            if (no_more_imgs)
-            {
-                break;
-            }
-            img_idx++;
-            out_w_start = out_w_end + 2;
-        }
-        if (no_more_imgs)
-        {
-            break;
-        }
-        out_h_start = out_h_end + 2;
-    }
-    if (rec == 1)
-    {
-        circle(out_img, cv::Point(15, 15), 14, cv::Scalar(0, 0, 255), -1, 8);
-        putText(out_img,
-                "REC",
-                cv::Point(30, 20),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.5,
-                cv::Scalar(255, 255, 255));
-    }
-    cv::namedWindow(title);
-    cv::imshow(title, out_img);
-    return out_img;
-}
-
-void
-recSwitch(int recPosition, void *)
-{
-    std::cout
-      << (recPosition == 0 ? "\n...Paused recording" : "\n...Recording started")
-      << "\n";
-}
-
-void
-colorizeMat(cv::Mat &img)
-{
-    for (auto m = 0; m < img.rows; m++)
-    {
-        for (auto n = 0; n < img.cols; n++)
-        {
-            img.at<cv::Vec3b>(m, n)[0] = 0;
-            img.at<cv::Vec3b>(m, n)[1] = 0;
-            img.at<cv::Vec3b>(m, n)[2] = 255;
-        }
-    }
-}
-
-void
-videoDisplaySetup(cv::Size &           grid,
-                  cv::Size &           imdim,
-                  std::vector<cv::Mat> imgs,
-                  double &             scaler,
-                  int                  c_row,
-                  int                  c_col)
-{
-    // find number of images for placement
-    auto n_imgs = static_cast<int>(imgs.size());
-    int  n_cols;
-    int  m_rows;
-
-    // calculate m rows and n cols based on num images
-    if (c_col == -1)
-    {
-        n_cols = static_cast<int>(ceil(sqrt(n_imgs)));
-    } else
-    {
-        n_cols = c_col;
-    }
-    if (c_row == -1)
-    {
-        m_rows = static_cast<int>(
-          ceil(static_cast<double>(n_imgs) / static_cast<double>(n_cols)));
-    } else
-    {
-        m_rows = c_row;
-    }
-    if (n_cols * m_rows < n_imgs)
-    {
-        n_cols = static_cast<int>(ceil(sqrt(n_imgs)));
-        m_rows = static_cast<int>(
-          ceil(static_cast<double>(n_imgs) / static_cast<double>(n_cols)));
-    }
-
-    // small matrix which holds x,y dims for later max function
-    cv::Mat tmp_heights = cv::Mat_<double>(m_rows, n_cols);
-    cv::Mat tmp_widths  = cv::Mat_<double>(m_rows, n_cols);
-    int     dev_idx     = 0;
-    for (int m = 0; m < m_rows; m++)
-    {
-        for (int n = 0; n < n_cols; n++)
-        {
-            if (dev_idx < n_imgs)
-            {
-                // place x,y size of current image in matrix
-                tmp_heights.at<double>(m, n) = imgs[dev_idx].rows * scaler;
-                tmp_widths.at<double>(m, n)  = imgs[dev_idx].cols * scaler;
-            } else
-            {
-                tmp_heights.at<double>(m, n) = 0;
-                tmp_widths.at<double>(m, n)  = 0;
-            }
-            dev_idx++;
-        }
-    }
-
-    // find mat size for each dimension
-    double img_height = 0;
-    double img_width;
-
-    // max height for each row in grid
-    std::vector<double> max_row(static_cast<unsigned long>(m_rows), 0);
-    for (int m = 0; m < m_rows; m++)
-    {
-        minMaxIdx(tmp_heights.row(m), nullptr, &max_row[m]);
-        img_height += max_row[m];
-    }
-
-    // sum of widths for each row in grid, find max
-    std::vector<double> row_sums(static_cast<unsigned long>(m_rows), 0);
-    for (int m = 0; m < m_rows; m++)
-    {
-        for (int n = 0; n < n_cols; n++)
-        {
-            row_sums[m] += tmp_widths.at<double>(m, n);
-        }
-    }
-    auto max_col_it = std::max_element(
-      std::begin(row_sums), std::end(row_sums));
-    img_width = *max_col_it;
-    imdim     = cv::Size(static_cast<int>(ceil(img_width + n_cols)),
-                     static_cast<int>(ceil(img_height + m_rows)));
-    grid      = cv::Size(n_cols, m_rows);
-    std::cout << "\nDisplayed images frame dimensions:\n  Width=" << imdim.width
-              << ", Height=" << imdim.height
-              << "\nGrid size:\n  Columns=" << grid.width
-              << ", Rows=" << grid.height << "\n";
-}
 };  // namespace video
 
 #endif  // COGDEVCAM_VIDEO_H
