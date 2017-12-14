@@ -4,7 +4,7 @@
     description:
 
     @author Joseph M. Burling
-    @version 0.9.0 12/10/2017
+    @version 0.9.1 12/14/2017
 */
 
 #ifndef COGDEVCAM_COGDEVCAM_H
@@ -40,38 +40,37 @@ class CogDevCam
         audio_stream(options),
         video_streams(
           std::move(video::factory::multiIO(options, master_clock))),
-        stop_thread(options.video.n_devices),
+        pause_threads(options.video.n_devices),
         record_mode(false)
     {
-        n_devices   = program_opts.video.n_devices;
-        display_fps = program_opts.video.display_feed_fps;
-
-        display_clock.setTimeout(
-          timing::unit_ms_flt(static_cast<typename timing::unit_ms_flt::rep>(
-            display_clock.getSecondsMultiplier() / display_fps)));
-
+        n_devices     = program_opts.video.n_devices;
+        display_fps   = program_opts.video.display_feed_fps;
+        auto img_wait = static_cast<timing::unit_ms_flt::rep>(
+          display_clock.getSecondsMultiplier() / display_fps);
+        double thresh = 1;
+        display_clock.setTimeout(img_wait, thresh);
         if (program_opts.video.video_sync)
         {
-            sync_fps = static_cast<typename timing::unit_ms_flt::rep>(
-              master_clock.getSecondsMultiplier() /
+            video::VideoClock vid_clock;
+            auto              fps_dbl = static_cast<double>(
+              vid_clock.getSecondsMultiplier() /
               program_opts.video.frames_per_second);
 
-            master_clock.setTimeout(timing::unit_ms_flt(sync_fps));
-
-            waitkey_ms = static_cast<int>(sync_fps * .85);
+            for (int v = 0; v < n_devices; ++v)
+            {
+                video_streams[v].timerSetTimeout(fps_dbl, .95);
+            }
         }
-        master_clock.update();
-        display_clock.update();
     };
 
     bool
     openDevices()
     {
         fillFutures(future_state);
-        fillFutures(future_write);
         for (int j = 0; j < n_devices; ++j)
         {
             video_streams[j].open(program_opts.video.n_open_attempts);
+            video_streams[j].timerTimedOut();
         }
         audio_stream.open(master_clock.getStartTime());
         return isOpen();
@@ -80,30 +79,84 @@ class CogDevCam
     void
     run()
     {
+        record_mode = false;
+        exit_task   = false;
         setDisplay();
         while (true)
         {
-            preview_off = display_out.isSliderSet();
-            pingCapture();
-            getDisplayImages();
-            showDisplayImages();
-            writeAudio();
-
-            // terminate from key press
-            if (cv::waitKey(waitkey_ms) == exit_key) break;
-
-            // terminate from audio duration setting
-            if (!audio_stream.isRunning()) break;
+            previewModeOn();
+            if (exit_task) break;
+            writeModeOn();
+            if (exit_task) break;
         }
-        preview_off = false;
+
         record_mode = false;
+    };
+
+    void
+    previewModeOn()
+    {
+        // preview mode, no touching record_mode
+        audio_stream.toggleSave(false);
+
+        while (true)
+        {
+            if (display_out.isSliderSet())
+            {
+                record_mode = true;
+                break;
+            }
+            showDisplayImages();
+            if (checkRunning())
+            {
+                exit_task = true;
+                break;
+            }
+            displayImageInterrupt();
+        }
+    };
+
+    void
+    writeModeOn()
+    {
+        // recording mode
+        if (capture_initiated)
+        {
+            audio_stream.toggleSave(true);
+
+        } else
+        {
+            // set start of timestamp to zero if first time slider is set
+            audio_stream.toggleSave(true, 0);
+        }
+
+        capture_initiated = true;
+        while (true)
+        {
+            if (!display_out.isSliderSet())
+            {
+                record_mode = false;
+                break;
+            }
+            showDisplayImages();
+            if (checkRunning())
+            {
+                exit_task = true;
+                break;
+            }
+            displayImageInterrupt();
+        }
+    };
+    bool
+    checkRunning()
+    {
+        return cv::waitKey(1) == exit_key || !audio_stream.isRunning();
     };
 
     int
     closeAll()
     {
         futureWait(future_state, true);
-        futureWait(future_write);
         audio_stream.close();
         for (auto &vid : video_streams)
         {
@@ -129,20 +182,16 @@ class CogDevCam
     };
 
   private:
-    std::vector<cv::Mat>              img_set;
-    std::vector<Image>                fill_buffer;
-    std::vector<Image>                access_buffer;
-    std::vector<FutureImage>          future_write;
-    std::vector<FutureImage>          future_state;
-    std::vector<std::atomic_bool>     stop_thread;
-    std::atomic_bool                  record_mode;
-    bool                              preview_off       = false;
-    bool                              capture_initiated = false;
-    int                               exit_key          = 27;
-    size_t                            n_devices         = 0;
-    size_t                            display_fps       = 30;
-    typename timing::unit_ms_flt::rep sync_fps          = -1;
-    int                               waitkey_ms        = 1;
+    std::vector<cv::Mat>          img_set;
+    std::vector<Image>            fill_buffer;
+    std::vector<FutureImage>      future_state;
+    std::vector<std::atomic_bool> pause_threads;
+    std::atomic_bool              record_mode;
+    bool                          capture_initiated = false;
+    bool                          exit_task         = false;
+    int                           exit_key          = 27;
+    size_t                        n_devices         = 0;
+    size_t                        display_fps       = 30;
 
     bool
     isOpen()
@@ -194,80 +243,33 @@ class CogDevCam
         if (!isVideoOpen()) openDevices();
         if (record_mode) throw err::Runtime("Video devices already in use.");
         futureWait(future_state, true);
-        access_buffer.clear();
         fill_buffer.clear();
         img_set.clear();
         for (auto d = 0; d < n_devices; ++d)
         {
             Image img(video_streams[d].readTemp(), 0);
             display_out.colorizeMat(img.img);
-            access_buffer.push_back(img);
             fill_buffer.emplace_back(img);
-            img_set.push_back(img.img);
+            img_set.push_back(img.img.clone());
         }
     };
 
     void
-    pingCapture()
+    displayImageInterrupt()
     {
-        if (sync_fps > 0)
+        if (display_clock.timeout())
         {
-            auto timed_out = master_clock.timeout();
-            if (timed_out)
+            std::cout << display_clock.stopwatch() << std::endl;
+            for (size_t n = 0; n < n_devices; ++n)
             {
-                pauseForDisplay();
-            }
-            record_mode = preview_off && timed_out;
-        } else
-        {
-            record_mode = preview_off;
-            if (display_clock.timeout())
-            {
-                pauseForDisplay();
+                pause_threads[n] = true;
+                future_state[n].wait();
+                img_set[n] = fill_buffer[n].img.clone();
+                //                 img_set[n] = fill_buffer[n].img;
+                pause_threads[n] = false;
+                fillBuffer(n);
             }
         }
-    };
-
-    void
-    pauseForDisplay()
-    {
-        for (size_t n = 0; n < n_devices; ++n)
-        {
-            stop_thread[n] = true;
-            future_state[n].wait();
-            // access_buffer[n].img = fill_buffer[n].img.clone();
-            access_buffer[n].img = fill_buffer[n].img;
-            stop_thread[n]       = false;
-            fillBuffer(n);
-        }
-    };
-
-    void
-    writeAudio()
-    {
-        if (display_out.isSliderSet())
-        {
-            if (capture_initiated)
-            {
-                audio_stream.toggleSave(true);
-
-            } else
-            {
-                audio_stream.toggleSave(true, 0);
-            }
-            capture_initiated = true;
-
-        } else
-        {
-            audio_stream.toggleSave(false);
-        }
-    };
-
-    void
-    getDisplayImages()
-    {
-        img_set.clear();
-        for (auto &n : access_buffer) img_set.emplace_back(n.img);
     };
 
     void
@@ -283,20 +285,23 @@ class CogDevCam
           std::launch::async,
           [](video::IO &             device,
              Image &                 buff,
-             const std::atomic_bool &stop,
-             const std::atomic_bool &write_img) {
-              while (!stop)
+             const std::atomic_bool &pause_for_update,
+             const std::atomic_bool &record_switch_on) {
+              while (!pause_for_update)
               {
+                  // TODO: add buffer to video class and match with time for sync mode
                   device.read();
                   buff = Image(std::move(device.getLastImage()),
                                device.getLastImageTime());
-
-                  if (write_img) device.write(buff.img, buff.ts);
+                  if (record_switch_on && device.timerTimedOut())
+                  {
+                      device.write(buff.img, buff.ts);
+                  }
               }
           },
           std::ref(video_streams[index]),
           std::ref(fill_buffer[index]),
-          std::ref(stop_thread[index]),
+          std::ref(pause_threads[index]),
           std::ref(record_mode));
     };
 
@@ -317,9 +322,9 @@ class CogDevCam
     {
         for (int f = 0; f < _futures.size(); ++f)
         {
-            if (pauseThread) stop_thread[f] = true;
+            if (pauseThread) pause_threads[f] = true;
             _futures[f].wait();
-            if (pauseThread) stop_thread[f] = false;
+            if (pauseThread) pause_threads[f] = false;
         }
     };
 };

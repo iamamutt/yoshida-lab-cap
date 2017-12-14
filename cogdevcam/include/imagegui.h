@@ -4,7 +4,7 @@
     description:
 
     @author Joseph M. Burling
-    @version 0.9.0 12/10/2017
+    @version 0.9.1 12/14/2017
 */
 
 #ifndef COGDEVCAM_IMAGEGUI_H
@@ -226,9 +226,9 @@ class WinShow
         {
             for (auto n = 0; n < img.cols; ++n)
             {
-                img.at<cv::Vec3b>(m, n)[0] = 0;
+                img.at<cv::Vec3b>(m, n)[0] = 255;
                 img.at<cv::Vec3b>(m, n)[1] = 0;
-                img.at<cv::Vec3b>(m, n)[2] = 255;
+                img.at<cv::Vec3b>(m, n)[2] = 0;
             }
         }
     };

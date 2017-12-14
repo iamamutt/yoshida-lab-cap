@@ -4,7 +4,7 @@
     description: _
 
     @author Joseph M. Burling
-    @version 0.9.0 11/2/2017
+    @version 0.9.1 12/14/2017
 */
 
 #ifndef __COGDEVCAM_OPTIONS_H
@@ -184,21 +184,19 @@ struct audio
 /// Contains user defined video options and defaults
 struct video
 {
-    bool                     video_sync           = false;
-    size_t                   n_usb                = 0;
-    size_t                   n_url                = 0;
-    size_t                   n_devices            = 0;
-    size_t                   n_open_attempts      = 5;
-    std::string              four_cc              = "HYUV";
-    std::string              video_container_ext  = ".avi";
-    double                   frames_per_second    = 30;
-    size_t                   display_feed_fps     = 12;
-    std::string              display_feed_name    = "VIDEO_FEED";
-    double                   display_feed_scale   = 0.5;
-    unsigned int             display_feed_rows    = 0;
-    unsigned int             display_feed_cols    = 0;
-    int                      min_frame_buffer_len = 2;
-    int                      max_frame_buffer_len = 30;
+    bool                     video_sync          = false;
+    size_t                   n_usb               = 0;
+    size_t                   n_url               = 0;
+    size_t                   n_devices           = 0;
+    size_t                   n_open_attempts     = 5;
+    std::string              four_cc             = "HYUV";
+    std::string              video_container_ext = ".avi";
+    double                   frames_per_second   = 30;
+    size_t                   display_feed_fps    = 12;
+    std::string              display_feed_name   = "VIDEO_FEED";
+    double                   display_feed_scale  = 0.5;
+    unsigned int             display_feed_rows   = 0;
+    unsigned int             display_feed_cols   = 0;
     std::vector<int>         device_ids;
     std::vector<std::string> ip_urls;
     std::vector<double>      set_capture_fps;
@@ -828,21 +826,20 @@ class Video : virtual public Foundation
                   "Please enter a codec with at least four characters. "
                   "see FOURCC.org.");
             }
-            if (video.store.display_feed_fps < video.store.min_frame_buffer_len)
+            if (video.store.display_feed_fps < 1)
             {
-                misc::strPrint(
-                  {"Warning. Minimum buffer length set to",
-                   std::to_string(video.store.min_frame_buffer_len),
-                   "frames"});
-                video.store.display_feed_fps = video.store.min_frame_buffer_len;
+                misc::strPrint({"Warning. Display update length set to",
+                                std::to_string(video.store.display_feed_fps),
+                                "frames, should be at least 1"});
+                video.store.display_feed_fps = 1;
             }
-            if (video.store.display_feed_fps > video.store.max_frame_buffer_len)
+            if (video.store.display_feed_fps > video.store.frames_per_second)
             {
-                misc::strPrint(
-                  {"Warning. Maximum buffer length set to",
-                   std::to_string(video.store.max_frame_buffer_len),
-                   "frames"});
-                video.store.display_feed_fps = video.store.max_frame_buffer_len;
+                misc::strPrint({"Warning. Display update length set to",
+                                std::to_string(video.store.display_feed_fps),
+                                "frames, which is faster than synced FPS"});
+                video.store.display_feed_fps = video.store.frames_per_second /
+                                               2;
             }
         }
     };

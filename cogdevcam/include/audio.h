@@ -4,7 +4,7 @@
     description: Open/close audio devices using the RtAudio library
 
     @author Joseph M. Burling
-    @version 0.9.0 11/27/2017
+    @version 0.9.1 12/14/2017
 */
 
 #ifndef __COGDEVCAM_AUDIO_H
@@ -418,8 +418,7 @@ class CallbackTimestamps
         frame_ts -= size * sample_time_ms;
         if (frame_ts <= 0)
         {
-            roll_over = 1.0 +
-                        std::floor(-frame_ts / timeout_reached) *
+            roll_over = (1.0 + std::floor(-frame_ts / timeout_reached)) *
                           timeout_reached +
                         frame_ts;
             if (roll_over < timeout_thresh || roll_over > timeout_reached)
@@ -585,7 +584,7 @@ struct CallbackData
     explicit CallbackData(const timing::TimePoint &tp,
                           unsigned                 buff_size,
                           AudioTimeType            pulse_interval,
-                          double                   thresh = 0.1)
+                          double                   thresh)
       : ts(tp, buff_size, pulse_interval, thresh){};
 
     CallbackOutputData play;
@@ -1325,7 +1324,7 @@ class Streams : public StreamData
                  sample_rate,
                  static_cast<audio::data::AudioTimeType>(
                    audio::data::timeRescaleVal() / pulse_rate),
-                 0.1)
+                 0.95)
     {
         init();
     };

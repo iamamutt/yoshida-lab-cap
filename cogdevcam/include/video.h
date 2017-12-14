@@ -4,7 +4,7 @@
     description:
 
     @author Joseph M. Burling
-    @version 0.9.0 11/26/2017
+    @version 0.9.1 12/14/2017
 */
 
 #ifndef COGDEVCAM_VIDEO_H
@@ -321,6 +321,7 @@ class Timestamps
     setClock(timing::TimePoint start_time_ms)
     {
         timestamp_timer.set(start_time_ms);
+        timestamp_timer.setTimeout(VideoDuration(0), 0);
     };
 
     void
@@ -358,17 +359,13 @@ class Timestamps
     void
     closeTime()
     {
-        if (write_timestmaps && isTimeOpen())
-        {
-            timestamp_stream.close();
-        }
+        if (write_timestmaps && isTimeOpen()) timestamp_stream.close();
     };
 
     void
-    writeTime(VideoTimeType ts = 0)
+    writeTime(VideoTimeType ts)
     {
         if (!write_timestmaps) return;
-        if (ts != 0) ts = getTimestamp();
         if (isTimeOpen()) timestamp_stream << ts << "\n";
     };
 
@@ -382,6 +379,20 @@ class Timestamps
     getTimestampFilename() const
     {
         return ts_filename;
+    }
+
+    bool
+    timerTimedOut()
+    {
+        return timestamp_timer.timeout();
+    }
+
+    void
+    timerSetTimeout(double ms, double thresh = 1)
+    {
+        timestamp_timer.setTimeout(
+          VideoDuration(static_cast<VideoTimeType>(ms)),
+          static_cast<timing::Float_t>(thresh));
     }
 
   protected:
@@ -754,14 +765,14 @@ class IO
     write()
     {
         writeImage(*last_img);
-        if (useTimestampWriter()) writeTime(last_ts);
+        writeTime(last_ts);
     };
 
     void
     write(cv::Mat &img, VideoTimeType &t)
     {
         writeImage(img);
-        if (useTimestampWriter()) writeTime(t);
+        writeTime(t);
     };
 
     cv::Mat

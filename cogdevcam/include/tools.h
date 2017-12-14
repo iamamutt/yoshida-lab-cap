@@ -4,7 +4,7 @@
     description:
 
     @author Joseph M. Burling
-    @version 0.9.0 11/27/2017
+    @version 0.9.1 12/14/2017
 */
 
 #ifndef __COGDEVCAM_TOOLS_H
@@ -541,10 +541,9 @@ class Clock
         timer_time_point       = clock.timer_time_point;
         duration_since_elapsed = clock.duration_since_elapsed;
         duration_since_lap     = clock.duration_since_lap;
-        duration_leftover      = clock.duration_leftover;
         timer_duration         = clock.timer_duration;
         timer_duration_c       = clock.timer_duration_c;
-        timer_min_leftover     = clock.timer_min_leftover;
+        timer_threshold        = clock.timer_threshold;
     };
 
     void
@@ -576,7 +575,7 @@ class Clock
     };
 
     ctype
-    stopwatch(const TimePoint &time_point = getPresent())
+    stopwatch(TimePoint time_point = getPresent())
     {
         duration_since_lap  = time_point - captured_time_point;
         captured_time_point = time_point;
@@ -584,7 +583,7 @@ class Clock
     };
 
     ctype
-    elapsed(const TimePoint &time_point = getPresent())
+    elapsed(TimePoint time_point = getPresent())
     {
         duration_since_elapsed = time_point - start_time_point;
         return recast(duration_since_elapsed);
@@ -597,36 +596,47 @@ class Clock
     };
 
     void
-    setTimeout(Dur t_minus, Float_t thresh = 0.1)
+    setTimeout(Dur t_minus, Float_t thresh = 1.0)
     {
         if (thresh < 0 || thresh > 1)
         {
-            err::Runtime("timeout threshold must be between 0 and 1");
+            throw err::Runtime("timeout threshold must be between 0 and 1");
         }
 
-        timer_duration    = std::chrono::duration_cast<Duration>(t_minus);
-        duration_leftover = timer_duration;
-        timer_duration_c  = timer_duration.count();
+        timer_duration   = std::chrono::duration_cast<Duration>(t_minus);
+        timer_duration_c = timer_duration.count();
 
-        // anything below this is essentially zero and timeout reset
-        thresh = std::round(static_cast<Float_t>(timer_duration_c) * thresh);
-        timer_min_leftover = Duration(static_cast<stdtype>(thresh));
-        timer_time_point   = getPresent();
+        // anything above this resets timeout
+        timer_threshold  = Duration(static_cast<stdtype>(
+          std::round(static_cast<Float_t>(timer_duration_c) * thresh)));
+        timer_time_point = getPresent();
+    };
+
+    void
+    setTimeout(ctype t_minus, double thresh = 1.0) {
+        setTimeout(Dur(t_minus), static_cast<Float_t>(thresh));
     };
 
     bool
-    timeout()
+    timeout(TimePoint time_point = getPresent())
     {
-        TimePoint now          = getPresent();
-        duration_since_elapsed = now - start_time_point;
-        duration_leftover      = duration_leftover - (now - timer_time_point);
-        timer_time_point       = now;
-        if (duration_leftover < duration_leftover.zero())
+        Duration duration_leftover = time_point - timer_time_point;
+        if (timer_threshold <= timer_threshold.zero()) return true;
+        if (timer_threshold <= duration_leftover)
         {
-            leftOverTime();
-            // duration_leftover = timer_duration;
+            timer_time_point  = time_point;
+            duration_leftover = timer_duration - duration_leftover;
+            if (duration_leftover < duration_leftover.zero())
+            {
+                timer_time_point = timer_time_point -
+                                   leftOverTime(duration_leftover);
+            } else
+            {
+                timer_time_point = timer_time_point + duration_leftover;
+            }
             return true;
         }
+
         return false;
     };
 
@@ -637,19 +647,14 @@ class Clock
      * called may be more than the timeout period and a multiple used creating
      * more frequent stops
      */
-    void
-    leftOverTime()
+    Duration
+    leftOverTime(Duration &neg_dur)
     {
-        auto over_t  = duration_leftover.count();
-        auto d_multi = static_cast<stdtype>(
-          1.0 + std::floor(static_cast<Float_t>((-over_t) / timer_duration_c)));
-        auto roll_over    = d_multi * timer_duration_c + over_t;
-        duration_leftover = Duration(static_cast<stdtype>(roll_over));
-        if (duration_leftover < timer_min_leftover ||
-            duration_leftover > timer_duration)
-        {
-            duration_leftover = timer_duration;
-        }
+        auto     over_time = static_cast<Float_t>(neg_dur.count());
+        auto     over_time_multi = -over_time -
+                               timer_duration_c *
+                                 std::floor(-over_time / timer_duration_c);
+        return Duration(static_cast<stdtype>(over_time_multi));
     };
 
     const TimePoint &
@@ -676,12 +681,6 @@ class Clock
         return duration_since_lap;
     };
 
-    const Duration &
-    getTimeoutDuration() const
-    {
-        return duration_leftover;
-    };
-
     Float_t
     getSecondsMultiplier() const
     {
@@ -697,9 +696,8 @@ class Clock
     TimePoint timer_time_point    = getPresent();
     Duration  duration_since_elapsed{0};
     Duration  duration_since_lap{0};
-    Duration  duration_leftover{0};
     Duration  timer_duration{0};
-    Duration  timer_min_leftover{0};
+    Duration  timer_threshold{0};
     ctype     timer_duration_c = 0;
 
     void
@@ -715,7 +713,6 @@ class Clock
     {
         duration_since_elapsed = duration_since_elapsed.zero();
         duration_since_lap     = duration_since_lap.zero();
-        duration_leftover      = timer_duration;
     };
 };
 
@@ -826,7 +823,6 @@ makeFutureValid()
     _future = std::async(std::launch::async, []() { return T(); });
     return _future;
 }
-
 };  // namespace futures
 
 #endif  // __COGDEVCAM_TOOLS_H

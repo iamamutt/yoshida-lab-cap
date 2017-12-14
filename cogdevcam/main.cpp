@@ -4,7 +4,7 @@
     description: main program
 
     @author Joseph M. Burling
-    @version 0.9.0 12/10/2017
+    @version 0.9.1 12/14/2017
 */
 
 #include "cogdevcam.h"
