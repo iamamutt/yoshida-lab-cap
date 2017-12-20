@@ -4,7 +4,7 @@
     description:
 
     @author Joseph M. Burling
-    @version 0.9.1 12/14/2017
+    @version 0.9.2 12/19/2017
 */
 
 #ifndef COGDEVCAM_IMAGEGUI_H
@@ -174,12 +174,18 @@ class WinShow
                 if (img_idx < n_images)
                 {
                     cv::Mat in_img;
-                    resize(image_vec[img_idx],
-                           in_img,
-                           cv::Size(),
-                           display_scale,
-                           display_scale,
-                           cv::INTER_NEAREST);
+                    if (display_scale == 1)
+                    {
+                        in_img = image_vec[img_idx];
+                    } else
+                    {
+                        cv::resize(image_vec[img_idx],
+                                   in_img,
+                                   cv::Size(),
+                                   display_scale,
+                                   display_scale,
+                                   cv::INTER_NEAREST);
+                    }
 
                     cv::Size in_img_sz  = in_img.size();
                     out_h_end           = out_h_start + (in_img_sz.height - 1);

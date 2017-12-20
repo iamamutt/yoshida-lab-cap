@@ -4,7 +4,7 @@
     description:
 
     @author Joseph M. Burling
-    @version 0.9.1 12/14/2017
+    @version 0.9.2 12/19/2017
 */
 
 #ifndef __COGDEVCAM_TOOLS_H
@@ -22,50 +22,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-//#include <opencv2/core/mat.hpp>
-/*
-
-namespace pkgs {
-template<typename Val = double>
-using KeyVal = std::pair<std::string, Val>;
-
-template<typename Val       = int,
-         typename Compare   = std::less<std::string>,
-         typename Allocator = std::allocator<KeyVal<Val>>>
-class Dict : public std::map<std::string, Val, Compare, Allocator>
-{
-  public:
-    Dict() = default;
-
-    Dict(const std::initializer_list<KeyVal<Val>> __l,
-         const Compare &                          __comp = Compare(),
-         const Allocator &                        __a    = Allocator())
-      : std::map<std::string, Val, Compare, Allocator>(__l, __comp, __a){};
-
-    const std::vector<std::string>
-    keys()
-    {
-        std::vector<std::string> k;
-        for (auto iter = this->begin(); iter != this->end(); ++iter)
-        {
-            k.emplace_back(iter->first);
-        }
-        return k;
-    };
-
-    std::vector<Val>
-    values()
-    {
-        std::vector<Val> v;
-        for (auto iter = this->begin(); iter != this->end(); iter++)
-        {
-            v.emplace_back(iter->second);
-        }
-        return v;
-    };
-};
-};  // namespace pkgs
-*/
 
 namespace err {
 class Runtime;
@@ -211,90 +167,44 @@ fileExists(const std::string &path)
     return boost::filesystem::exists(boost_path);
 };
 
-std::tuple<std::string, std::string>
-makeDirectory(const std::string &root_path, const std::string &file_prefix = "")
+std::string
+normalizePath(const std::string &parent, const std::string &stem = "")
 {
-    std::string folder_name{root_path};
-    if (!file_prefix.empty())
+    boost::filesystem::path boost_path(parent);
+    boost_path /= stem;
+    boost::filesystem::path first_dir = *boost_path.begin();
+
+    if (first_dir == "." || first_dir == "..")
     {
-        folder_name = folder_name + "/" + file_prefix;
+        boost_path = boost::filesystem::weakly_canonical(boost_path);
     }
-    boost::filesystem::path boost_path(folder_name);
-    auto                    parent = boost_path.parent_path();
+
+    boost_path = boost_path.make_preferred();
+
+    return boost_path.generic_string();
+};
+
+std::tuple<std::string, std::string>
+makeDirectory(const std::string &root_path, const std::string &stem = "")
+{
+    boost::filesystem::path boost_path(normalizePath(root_path, stem));
+    boost::filesystem::path parent_dir = boost_path;
+    boost::filesystem::path stem_file("");
+    if (boost_path.has_filename())
+    {
+        parent_dir = boost_path.parent_path();
+        stem_file  = boost_path.stem();
+    }
     try
     {
-        if (boost_path.has_filename())
-        {
-            boost::filesystem::create_directories(boost_path.parent_path());
-        } else
-        {
-            boost::filesystem::create_directories(boost_path);
-        }
+        boost::filesystem::create_directories(parent_dir);
     } catch (const boost::filesystem::filesystem_error &err)
     {
         throw err::Runtime(err);
     }
-    return std::make_tuple(parent.string(), boost_path.stem().string());
+    return std::make_tuple(parent_dir.string(), stem_file.string());
 };
 
-/*
-std::tuple<std::vector<std::vector<cv::Mat>>, std::vector<std::vector<int>>>
-mergePastPresent( std::vector<std::vector<cv::Mat>> &past_mat,
-    std::vector<std::vector<cv::Mat>> &present_mat,
-    std::vector<std::vector<int>> &past_ts,
-    std::vector<std::vector<int>> &present_ts,
-    int last_length
-){
-  auto mat_size = past_mat.size();
-  auto ts_size = past_ts.size();
-  if (mat_size != ts_size) {
-    throw std::length_error("N timestamps not same as N cameras");
-  }
-  std::vector<std::vector<cv::Mat>> images(mat_size);
-  std::vector<std::vector<int>> timestamps(ts_size);
-  std::vector<std::future<void>> mat_thread;
-  std::vector<std::future<void>> ts_thread;
-  for (auto i = 0; i < mat_size; ++i) {
-    mat_thread.emplace_back(std::async(std::launch::async, [
-        &images,
-        &past_mat,
-        &present_mat,
-        &last_length
-    ](int ii){
-      auto size_mat_0 = past_mat[ii].size();
-      for (auto j = size_mat_0 - 1; j > size_mat_0 - last_length && j >= 0; --j)
-{ images[ii].emplace_back(past_mat[ii][j]);
-      }
-      for (auto j : present_mat[ii]) {
-        images[ii].emplace_back(j);
-      }
-    }, i));
-  }
-  for (auto i = 0; i < ts_size; ++i) {
-    ts_thread.emplace_back(std::async(std::launch::async, [
-        &timestamps,
-        &past_ts,
-        &present_ts,
-        &last_length
-    ](int ii){
-      auto size_ts_0 = past_ts[ii].size();
-      for (auto j = size_ts_0 - 1; j > size_ts_0 - last_length && j >= 0; --j) {
-        timestamps[ii].emplace_back(past_ts[ii][j]);
-      }
-      for (auto j : present_ts[ii]) {
-        timestamps[ii].emplace_back(j);
-      }
-    }, i));
-  }
-  for (auto &i : ts_thread) {
-    i.wait();
-  }
-  for (auto &i : mat_thread) {
-    i.wait();
-  }
-  return make_tuple(images, timestamps);
-}
-*/
 int
 msTimestamp(std::chrono::time_point<std::chrono::high_resolution_clock> &tick)
 {
@@ -613,7 +523,8 @@ class Clock
     };
 
     void
-    setTimeout(ctype t_minus, double thresh = 1.0) {
+    setTimeout(ctype t_minus, double thresh = 1.0)
+    {
         setTimeout(Dur(t_minus), static_cast<Float_t>(thresh));
     };
 
@@ -650,8 +561,8 @@ class Clock
     Duration
     leftOverTime(Duration &neg_dur)
     {
-        auto     over_time = static_cast<Float_t>(neg_dur.count());
-        auto     over_time_multi = -over_time -
+        auto over_time       = static_cast<Float_t>(neg_dur.count());
+        auto over_time_multi = -over_time -
                                timer_duration_c *
                                  std::floor(-over_time / timer_duration_c);
         return Duration(static_cast<stdtype>(over_time_multi));

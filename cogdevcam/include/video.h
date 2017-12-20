@@ -4,7 +4,7 @@
     description:
 
     @author Joseph M. Burling
-    @version 0.9.1 12/14/2017
+    @version 0.9.2 12/19/2017
 */
 
 #ifndef COGDEVCAM_VIDEO_H

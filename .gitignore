@@ -6,8 +6,7 @@
 *.txt.user
 bin/
 build/
-cmake-build-debug/
-cmake-build-release/
+cmake-build-*/
 include/dsound.h
 include/RtAudio.h
 install.d/

@@ -236,7 +236,12 @@ foreach (COLLECTED_SRC_DIR ${PROJECT_INCLUDE_DIRS})
 endforeach (COLLECTED_SRC_DIR)
 
 set(EXEC_OUTPUT_NAMES ${BIN_NAME})
+
 if (BUILD_TESTS)
+        list(APPEND EXEC_OUTPUT_NAMES test_audio)
+        add_executable(test_audio "${PROJECT_TEST_FILES}/test_audio.cpp")
+        target_link_libraries(test_audio ${RtAudio_STATIC_LIBRARIES} ${RtAudio_EXTERN_LIST} ${Boost_LIBRARIES})
+
         list(APPEND EXEC_OUTPUT_NAMES test_video)
         add_executable(test_video "${PROJECT_TEST_FILES}/test_video.cpp")
         target_link_libraries(test_video ${OpenCV_LIBS})

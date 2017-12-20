@@ -4,7 +4,7 @@
     description: Open/close audio devices using the RtAudio library
 
     @author Joseph M. Burling
-    @version 0.9.1 12/14/2017
+    @version 0.9.2 12/19/2017
 */
 
 #ifndef __COGDEVCAM_AUDIO_H
@@ -631,7 +631,9 @@ format2sizeof(RtAudioFormat fmt)
         case RTAUDIO_SINT32: size = sizeof(int); break;
         case RTAUDIO_FLOAT32: size = sizeof(float); break;
         case RTAUDIO_FLOAT64: size = sizeof(double); break;
-        default: throw err::Runtime("Unknown RtAudioFormat");
+        default:
+            throw err::Runtime("Unknown RtAudioFormat (--abits): " +
+                               std::to_string(fmt));
     }
     return size;
 };
@@ -648,7 +650,9 @@ format2bits(RtAudioFormat fmt)
         case RTAUDIO_SINT32: bit_depth = 32; break;
         case RTAUDIO_FLOAT32: bit_depth = 32; break;
         case RTAUDIO_FLOAT64: bit_depth = 64; break;
-        default: throw err::Runtime("Unknown RtAudioFormat");
+        default:
+            throw err::Runtime("Unknown RtAudioFormat (--abits): " +
+                               std::to_string(fmt));
     }
     return bit_depth;
 };
@@ -665,7 +669,9 @@ format2scale(RtAudioFormat fmt)
         case RTAUDIO_SINT32: scale = 2147483647.0; break;
         case RTAUDIO_FLOAT32: scale = 1.0; break;
         case RTAUDIO_FLOAT64: scale = 1.0; break;
-        default: throw err::Runtime("Unknown RtAudioFormat");
+        default:
+            throw err::Runtime("Unknown RtAudioFormat (--abits): " +
+                               std::to_string(fmt));
     }
     return scale;
 };
@@ -673,7 +679,13 @@ format2scale(RtAudioFormat fmt)
 std::string
 format2string(RtAudioFormat fmt)
 {
-    std::string size;
+    RtAudioFormat fmt_sint8   = RTAUDIO_SINT8;
+    RtAudioFormat fmt_sint16  = RTAUDIO_SINT16;
+    RtAudioFormat fmt_sint24  = RTAUDIO_SINT24;
+    RtAudioFormat fmt_sint32  = RTAUDIO_SINT32;
+    RtAudioFormat fmt_float32 = RTAUDIO_FLOAT32;
+    RtAudioFormat fmt_float64 = RTAUDIO_FLOAT64;
+    std::string   size;
     switch (fmt)
     {
         case RTAUDIO_SINT8:
@@ -682,7 +694,9 @@ format2string(RtAudioFormat fmt)
         case RTAUDIO_SINT32: size = "sint"; break;
         case RTAUDIO_FLOAT32:
         case RTAUDIO_FLOAT64: size = "float"; break;
-        default: throw err::Runtime("Unknown RtAudioFormat");
+        default:
+            throw err::Runtime("Unknown RtAudioFormat (--abits): " +
+                               std::to_string(fmt));
     }
     return size;
 };
@@ -835,6 +849,12 @@ callback(void *              outputBuffer,
         savePlayback(data, outputBuffer);
     }
 
+    if (data->ts.buffer_sample == data->stop_after)
+    {
+        data->aborted = true;
+        return 1;
+    }
+
     if (data->write)
     {
         data->ts.writeCallbackTimes();
@@ -842,12 +862,6 @@ callback(void *              outputBuffer,
     } else
     {
         data->ts.clearBuffers();
-    }
-
-    if (data->ts.buffer_sample == data->stop_after)
-    {
-        data->aborted = true;
-        return 1;
     }
 
     return return_value;
@@ -1006,7 +1020,7 @@ apiCompiled(RtAudio::Api &api)
 };
 
 void
-fillStreamParameters(const param::data::audio::stream &pars,
+fillStreamParameters(const param::data::Audio::stream &pars,
                      const data::Device &              info,
                      RtAudio::StreamParameters *       stream_ref)
 {
@@ -1071,10 +1085,14 @@ chooseSampleRate(unsigned int               play_rate,
             }
         }
         break;
-        case audio::data::StreamMode::PLAY_ONLY: { sample_rate = play_rate;
+        case audio::data::StreamMode::PLAY_ONLY:
+        {
+            sample_rate = play_rate == 0 ? play_info.preferred_rate : play_rate;
         }
         break;
-        case audio::data::StreamMode::RECORD_ONLY: { sample_rate = rec_rate;
+        case audio::data::StreamMode::RECORD_ONLY:
+        {
+            sample_rate = rec_rate == 0 ? rec_info.preferred_rate : rec_rate;
         }
         break;
         case audio::data::StreamMode::NONE: { sample_rate = 0;
@@ -1096,7 +1114,7 @@ chooseBitDepth(unsigned                   bit_depth,
 };
 
 void
-setFlagsOptions(const param::data::audio &audio,
+setFlagsOptions(const param::data::Audio &audio,
                 RtAudio::StreamOptions *  options)
 {
     RtAudioStreamFlags flags{0};
@@ -1250,7 +1268,7 @@ class StreamData
   private:
     // fill in rest of options
     void
-    fixConflictingOptions(const param::data::audio &audio)
+    fixConflictingOptions(const param::data::Audio &audio)
     {
         sample_rate = chooseSampleRate(audio.playback.sample_rate,
                                        audio.record.sample_rate,
@@ -1363,6 +1381,10 @@ class Streams : public StreamData
             {
                 setTime(start_time);
                 main_audio.startStream();
+                if (!main_audio.isStreamRunning())
+                {
+                    std::cerr << "\nStream was not started\n";
+                }
             } catch (RtAudioError &err)
             {
                 err.printMessage();
@@ -1457,6 +1479,13 @@ class Streams : public StreamData
     getBufferCount()
     {
         return callback.ts.buffer_sample;
+    };
+
+    void
+    setRunDuration(double duration_sec)
+    {
+        record_duration_sec = duration_sec;
+        callback.stop_after = timeToBuffers();
     };
 
   private:
@@ -1597,10 +1626,14 @@ class Streams : public StreamData
     }
 
     uint64_t
-    timeToBuffers() const
+    timeToBuffers(double dur = -1) const
     {
+        if (dur < 0)
+        {
+            dur = record_duration_sec;
+        }
         return static_cast<uint64_t>(
-          std::ceil(static_cast<double>(sample_rate) * record_duration_sec /
+          std::ceil(static_cast<double>(sample_rate) * dur /
                     static_cast<double>(buffer_size)));
     };
 };

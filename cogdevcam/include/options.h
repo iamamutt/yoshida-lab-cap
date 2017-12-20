@@ -4,7 +4,7 @@
     description: _
 
     @author Joseph M. Burling
-    @version 0.9.1 12/14/2017
+    @version 0.9.2 12/19/2017
 */
 
 #ifndef __COGDEVCAM_OPTIONS_H
@@ -114,16 +114,21 @@ argsParser(int argc, const char *const *argv)
 }  // namespace helper
 
 namespace data {
-class base
+class BaseDescription
 {
+    int n_args = 1;
+
   public:
-    base() = default;
+    BaseDescription() = default;
 
-    base(const int argc, const char *const *argv)
-      : parser(helper::argsParser(argc, argv)){};
+    BaseDescription(const int argc, const char *const *argv)
+      : parser(helper::argsParser(argc, argv))
+    {
+        n_args = argc;
+    };
 
-    po::positional_options_description positional;
-    po::options_description            main{
+    po::positional_options_description args;
+    po::options_description            kwargs{
       helper::cmd_line_width(), helper::cmd_line_textw()};
     po::variables_map       map{};
     po::command_line_parser parser{
@@ -133,16 +138,23 @@ class base
     fillParser(const int argc, const char *const *argv)
     {
         parser = helper::argsParser(argc, argv);
+        n_args = argc;
+    };
+
+    bool
+    noArgs()
+    {
+        return n_args < 2;
     };
 };
 
 template<typename DataStorage>
-class subsection
+class SubDescription
 {
   public:
-    explicit subsection(const std::string &subtitle_text,
-                        unsigned           max_w = 140,
-                        unsigned           txt_w = 75)
+    explicit SubDescription(const std::string &subtitle_text,
+                            unsigned           max_w = 140,
+                            unsigned           txt_w = 75)
       : help(subtitle_text, max_w, txt_w){};
 
     po::options_description help{""};
@@ -150,14 +162,14 @@ class subsection
 };
 
 /// Contains global program options
-struct general
+struct General
 {
     std::string file_identifier  = "";
     std::string root_save_folder = ".";
     bool        verbose          = false;
 };
 /// Contains user defined audio options and defaults
-struct audio
+struct Audio
 {
     /// audio device specific parameters
     struct stream
@@ -174,22 +186,22 @@ struct audio
     bool        linux_default       = false;
     bool        hog_device          = false;
     unsigned    api_enumerator      = 0;
-    unsigned    buffer_size         = 0;
-    unsigned    bit_depth           = 0;
+    unsigned    buffer_size         = 320;
+    unsigned    bit_depth           = 16;
     double      pulse_rate          = 60;
     unsigned    pulse_width         = 1;
     double      record_duration_sec = 0;
     bool        save_playback       = false;
 };
 /// Contains user defined video options and defaults
-struct video
+struct Video
 {
     bool                     video_sync          = false;
     size_t                   n_usb               = 0;
     size_t                   n_url               = 0;
     size_t                   n_devices           = 0;
     size_t                   n_open_attempts     = 5;
-    std::string              four_cc             = "HYUV";
+    std::string              four_cc             = "MJPG";
     std::string              video_container_ext = ".avi";
     double                   frames_per_second   = 30;
     size_t                   display_feed_fps    = 12;
@@ -209,18 +221,18 @@ struct video
 namespace helper {
 /// set options for parser
 void
-storeParsed(param::data::base &main)
+storeParsed(param::data::BaseDescription &main)
 {
-    po::store(main.parser.options(main.main).positional(main.positional).run(),
-              main.map);
+    po::store(
+      main.parser.options(main.kwargs).positional(main.args).run(), main.map);
 };
 
 /// check if help option was specified, show and exit if so.
 void
-checkHelp(param::data::base &main)
+checkHelp(param::data::BaseDescription &main)
 {
     po::notify(main.map);
-    if (main.map.count("help") != 0)
+    if (main.map.count("help") != 0 || main.noArgs())
     {
         std::cout
           << "------------------------------------------------------------\n"
@@ -229,14 +241,15 @@ checkHelp(param::data::base &main)
              "                                <Author: Joseph M. Burling> \n"
              "\nUsage:: cogdevcam [options]\n"
              "           cogdevcam [options] cam_options.cfg\n\n";
-        std::cout << main.main << std::endl;
+        std::cout << main.kwargs << std::endl;
         std::exit(0);
     }
 };
 
 /// check if config file is valid, map parsed values directly to storage map.
 void
-checkConfigFile(param::data::base &main, const std::string &config_arg = "cfg")
+checkConfigFile(param::data::BaseDescription &main,
+                const std::string &           config_arg = "cfg")
 {
     if (main.map.count(config_arg))
     {
@@ -252,8 +265,9 @@ checkConfigFile(param::data::base &main, const std::string &config_arg = "cfg")
             // if file exists
             try
             {
-                po::store(po::parse_config_file(config_file_stream, main.main),
-                          main.map);
+                po::store(
+                  po::parse_config_file(config_file_stream, main.kwargs),
+                  main.map);
                 po::notify(main.map);
             } catch (const std::exception &err)
             {
@@ -266,26 +280,27 @@ checkConfigFile(param::data::base &main, const std::string &config_arg = "cfg")
 
 /// add options to main options list
 void
-appendMain(param::data::base &main, const po::options_description &desc)
+appendMain(param::data::BaseDescription & main,
+           const po::options_description &desc)
 {
-    main.main.add(desc);
+    main.kwargs.add(desc);
 };
 };  // namespace helper
 
 /// options initializer class
-class Foundation
+class OptionsBase
 {
   protected:
     /// initialize the command line options list and store general help lines
-    Foundation() = default;
+    OptionsBase() = default;
 
     void
-    initialized()
+    afterConstruction()
     {
-        base.main.add_options()("help,h",
-                                "Show this help documentation for "
-                                "description of command line arguments.\n");
-        base.main.add_options()(
+        base.kwargs.add_options()("help,h",
+                                  "Show this help documentation for "
+                                  "description of command line arguments.\n");
+        base.kwargs.add_options()(
           "cfg,c",
           po::value<std::string>(&config_file)->default_value(config_file),
           "A file path point to a configuration (.cfg) file."
@@ -299,7 +314,7 @@ class Foundation
           "  url = http://username:password@ipaddress/\n"
           "        axis-cgi/mjpg/video.cgi?resolution=1280x800&.mjpg\n");
 
-        base.positional.add("cfg", 1);
+        base.args.add("cfg", 1);
     };
 
   public:
@@ -309,7 +324,7 @@ class Foundation
         if (!command_line_parsed)
         {
             base.fillParser(argc, argv);
-            initialized();
+            afterConstruction();
             command_line_parsed = true;
         }
         helper::appendMain(base, getSubDescription());
@@ -331,24 +346,24 @@ class Foundation
 
   private:
     // base/top-level options container
-    param::data::base base;
+    param::data::BaseDescription base;
 
     bool        command_line_parsed = false;
     std::string config_file         = "";
 };
 
 /// Basic usage class subsection
-template<typename Storage = data::general>
-class General : virtual public Foundation
+template<typename Storage = data::General>
+class GeneralParser : virtual public OptionsBase
 {
   public:
-    explicit General(const int argc, const char *const *argv)
+    explicit GeneralParser(const int argc, const char *const *argv)
       : general("General options:", line_width, desc_width)
     {
         build(argc, argv);
     };
 
-    data::subsection<Storage> general;
+    data::SubDescription<Storage> general;
 
     po::options_description
     getSubDescription() override
@@ -404,17 +419,17 @@ class General : virtual public Foundation
 };
 
 /// Audio parameters class subsection
-template<typename Storage = data::audio>
-class Audio : virtual public Foundation
+template<typename Storage = data::Audio>
+class AudioParser : virtual public OptionsBase
 {
   public:
-    explicit Audio(const int argc, const char *const *argv)
+    explicit AudioParser(const int argc, const char *const *argv)
       : audio("Audio options:", line_width, desc_width)
     {
         build(argc, argv);
     };
 
-    data::subsection<Storage> audio;
+    data::SubDescription<Storage> audio;
 
     po::options_description
     getSubDescription() override
@@ -612,17 +627,17 @@ class Audio : virtual public Foundation
 };
 
 /// Basic usage class subsection
-template<typename Storage = data::video>
-class Video : virtual public Foundation
+template<typename Storage = data::Video>
+class VideoParser : virtual public OptionsBase
 {
   public:
-    explicit Video(const int argc, const char *const *argv)
+    explicit VideoParser(const int argc, const char *const *argv)
       : video("Video options:", line_width, desc_width)
     {
         build(argc, argv);
     };
 
-    data::subsection<Storage> video;
+    data::SubDescription<Storage> video;
 
     po::options_description
     getSubDescription() override
@@ -689,8 +704,7 @@ class Video : virtual public Foundation
           "FRAMES PER SECOND: "
           "Frames per second for all output videos, "
           "no matter the input fps."
-          "\n\n  e.g., --fps=25, -f 30\n",
-          "f");
+          "\n\n  e.g., --fps=25, -f 30\n");
         helper::newDefaultOption<size_t>(
           video.help,
           "dfps",
@@ -846,16 +860,16 @@ class Video : virtual public Foundation
 };
 
 /// combined options subsections into a single class
-class Options
-  : public General<data::general>
-  , public Video<data::video>
-  , public Audio<data::audio>
+class OptionsParser
+  : public GeneralParser<data::General>
+  , public VideoParser<data::Video>
+  , public AudioParser<data::Audio>
 {
   public:
-    explicit Options(const int argc, const char *const *argv)
-      : General<data::general>(argc, argv),
-        Video<data::video>(argc, argv),
-        Audio<data::audio>(argc, argv)
+    explicit OptionsParser(const int argc, const char *const *argv)
+      : GeneralParser<data::General>(argc, argv),
+        VideoParser<data::Video>(argc, argv),
+        AudioParser<data::Audio>(argc, argv)
     {
         finalize();
         checkGeneralOptions();
@@ -888,9 +902,9 @@ namespace opts {
 class Pars
 {
   public:
-    param::data::general basic;
-    param::data::audio   audio;
-    param::data::video   video;
+    param::data::General basic;
+    param::data::Audio   audio;
+    param::data::Video   video;
 
     Pars(const int _argc, const char *const *_argv)
     {
@@ -916,7 +930,7 @@ class Pars
     {
         try
         {
-            param::Options opt(_argc, _argv);
+            param::OptionsParser opt(_argc, _argv);
             basic = opt.general.store;
             audio = opt.audio.store;
             video = opt.video.store;
